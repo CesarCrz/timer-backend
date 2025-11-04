@@ -42,14 +42,31 @@ export async function getCurrentUser(request: Request) {
 
 export async function getUserBusinessId(userId: string) {
   const supabase = createServiceRoleClient();
-  const { data: business } = await supabase
+  let { data: business } = await supabase
     .from('businesses')
     .select('id')
     .eq('owner_id', userId)
-    .single();
+    .maybeSingle();
+  
+  // Si no existe, crear uno por defecto
   if (!business) {
-    throw new Error('Business not found for user');
+    const { data: newBusiness } = await supabase
+      .from('businesses')
+      .insert({
+        owner_id: userId,
+        name: 'Mi Negocio',
+        timezone: 'America/Mexico_City',
+        currency: 'MXN',
+      })
+      .select('id')
+      .single();
+    
+    if (!newBusiness) {
+      throw new Error('Failed to create business for user');
+    }
+    business = newBusiness;
   }
+  
   return business.id as string;
 }
 
