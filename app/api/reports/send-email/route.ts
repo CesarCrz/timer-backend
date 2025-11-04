@@ -3,6 +3,7 @@ import { withCors, preflight } from '@/lib/utils/cors';
 import { handleApiError } from '@/lib/utils/errors';
 import { getCurrentUser } from '@/lib/utils/auth';
 import { sendEmail } from '@/lib/emails/client';
+import { renderTemplate } from '@/lib/emails/templates';
 
 const schema = z.object({
   report_url: z.string().url(),
@@ -22,13 +23,14 @@ export async function POST(request: Request) {
     const { report_url, email } = schema.parse(body);
 
     const to = email || (user.email as string);
-    const html = `<p>Tu reporte está listo.</p><p><a href="${report_url}">Descargar reporte</a></p>`;
-    await sendEmail({ to, subject: 'Reporte de asistencia', html });
+    const { subject, html } = renderTemplate('report-ready', { reportUrl: report_url });
+    await sendEmail({ to, subject, html });
 
     return withCors(origin, Response.json({ sent: true }));
   } catch (error) {
     return handleApiError(error);
   }
 }
+
 
 
