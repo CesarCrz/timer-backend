@@ -1,4 +1,4 @@
-type TemplateName = 'report-ready' | 'generic';
+type TemplateName = 'report-ready' | 'invitation' | 'payment-failed' | 'generic';
 
 type TemplateData = Record<string, any>;
 
@@ -56,6 +56,22 @@ export function renderTemplate(name: TemplateName, data: TemplateData): { subjec
     case 'report-ready': {
       const html = reportReadyTemplate({ reportUrl: data.reportUrl, expiresAt: data.expiresAt });
       return { subject: 'Tu reporte está listo', html };
+    }
+    case 'invitation': {
+      const content = `
+        <h2 style="margin:0 0 12px 0">Has sido invitado a Timer</h2>
+        <p style="margin:0 0 16px 0;color:#374151">Hola ${data.fullName || ''}, fuiste invitado a *${data.businessName || 'tu empresa'}*.</p>
+        <p><a class="btn" href="${data.confirmUrl}" target="_blank" rel="noopener">Confirmar invitación</a></p>
+        <p class="muted">Este enlace expira en 24 horas.</p>
+      `;
+      return { subject: 'Invitación a Timer', html: baseLayout(content, 'Invitación | Timer') };
+    }
+    case 'payment-failed': {
+      const content = `
+        <h2 style="margin:0 0 12px 0">Pago no procesado</h2>
+        <p style="margin:0 0 16px 0;color:#374151">Hubo un problema con tu último pago. Por favor actualiza tu método de pago para evitar interrupciones.</p>
+      `;
+      return { subject: 'Problema con tu pago', html: baseLayout(content, 'Pago no procesado | Timer') };
     }
     case 'generic':
     default: {
