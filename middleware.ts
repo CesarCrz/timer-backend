@@ -8,6 +8,7 @@ export async function middleware(request: NextRequest) {
     '/',
     '/api/health',
     '/api/subscription-tiers',
+    '/api/timezones',
     '/api/invitations/validate',
     '/api/invitations/accept',
     '/api/webhooks',

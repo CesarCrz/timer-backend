@@ -21,15 +21,41 @@ export async function POST(request: NextRequest) {
       case 'checkout.session.completed': {
         const session = event.data.object;
         const subscription = await stripe.subscriptions.retrieve(session.subscription as string);
-        await supabase.from('user_subscriptions').insert({
-          business_id: session.metadata?.business_id,
-          tier_id: session.metadata?.tier_id,
-          stripe_subscription_id: subscription.id,
-          stripe_customer_id: subscription.customer as string,
-          status: 'active',
-          current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
-          current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
-        });
+        
+        // Verificar si ya existe suscripción para este negocio
+        const { data: existing } = await supabase
+          .from('user_subscriptions')
+          .select('id')
+          .eq('business_id', session.metadata?.business_id)
+          .maybeSingle();
+
+        if (existing) {
+          // Actualizar suscripción existente (upgrade/downgrade)
+          await supabase
+            .from('user_subscriptions')
+            .update({
+              tier_id: session.metadata?.tier_id,
+              stripe_subscription_id: subscription.id,
+              stripe_customer_id: subscription.customer as string,
+              status: 'active',
+              current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
+              current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+              cancel_at_period_end: false,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', existing.id);
+        } else {
+          // Crear nueva suscripción
+          await supabase.from('user_subscriptions').insert({
+            business_id: session.metadata?.business_id,
+            tier_id: session.metadata?.tier_id,
+            stripe_subscription_id: subscription.id,
+            stripe_customer_id: subscription.customer as string,
+            status: 'active',
+            current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
+            current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+          });
+        }
         break;
       }
       case 'customer.subscription.updated': {
@@ -41,6 +67,7 @@ export async function POST(request: NextRequest) {
             current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
             current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
             cancel_at_period_end: subscription.cancel_at_period_end,
+            updated_at: new Date().toISOString(),
           })
           .eq('stripe_subscription_id', subscription.id);
         break;

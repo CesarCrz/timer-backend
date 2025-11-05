@@ -5,6 +5,7 @@ import { handleApiError } from '@/lib/utils/errors';
 
 const businessSchema = z.object({
   name: z.string().min(1).max(100),
+  email: z.string().email().optional(),
   timezone: z.string().optional().default('America/Mexico_City'),
   currency: z.string().optional().default('MXN'),
 });
@@ -36,6 +37,7 @@ export async function GET(request: Request) {
         .insert({
           owner_id: user.id,
           name: businessName,
+          email: user.email?.toLowerCase() || null,
           timezone: user.user_metadata?.timezone || 'America/Mexico_City',
           currency: 'MXN',
         })
@@ -69,14 +71,24 @@ export async function POST(request: Request) {
 
     if (existing) {
       // Actualizar business existente
+      const updateData: any = {
+        name: payload.name,
+        timezone: payload.timezone,
+        currency: payload.currency,
+        updated_at: new Date().toISOString(),
+      };
+      
+      // Actualizar email solo si se proporciona
+      if (payload.email) {
+        updateData.email = payload.email.toLowerCase();
+      } else if (user.email) {
+        // Si no se proporciona pero el usuario tiene email, actualizarlo
+        updateData.email = user.email.toLowerCase();
+      }
+      
       const { data: updated } = await supabase
         .from('businesses')
-        .update({
-          name: payload.name,
-          timezone: payload.timezone,
-          currency: payload.currency,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updateData)
         .eq('id', existing.id)
         .select()
         .single();
@@ -90,6 +102,7 @@ export async function POST(request: Request) {
       .insert({
         owner_id: user.id,
         name: payload.name,
+        email: payload.email?.toLowerCase() || user.email?.toLowerCase() || null,
         timezone: payload.timezone,
         currency: payload.currency,
       })
@@ -101,4 +114,7 @@ export async function POST(request: Request) {
     return handleApiError(error);
   }
 }
+
+
+
 
