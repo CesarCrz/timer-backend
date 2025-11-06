@@ -6,6 +6,8 @@ import { handleApiError, NotFoundError } from '@/lib/utils/errors';
 const updateSchema = z.object({
   name: z.string().min(3).max(50).optional(),
   address: z.string().optional(),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
   tolerance_radius_meters: z.number().min(10).max(200).optional(),
   timezone: z.string().optional(),
   business_hours_start: z.string().regex(/^\d{2}:\d{2}:\d{2}$/).optional(),

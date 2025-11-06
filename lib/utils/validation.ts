@@ -39,7 +39,10 @@ export async function validatePlanLimits(
     .single();
 
   if (!subscription) {
-    throw new Error('No active subscription found');
+    const error = new Error('No active subscription found');
+    (error as any).statusCode = 402; // Payment Required
+    (error as any).code = 'NO_SUBSCRIPTION';
+    throw error;
   }
 
   const { data: tier } = await supabase

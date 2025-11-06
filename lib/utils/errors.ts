@@ -36,6 +36,18 @@ export class PlanLimitError extends Error {
 export function handleApiError(error: any): Response {
   console.error('API Error:', error);
 
+  // Manejar error de suscripción no encontrada
+  if (error?.code === 'NO_SUBSCRIPTION' || error?.message?.includes('No active subscription found')) {
+    return Response.json(
+      { 
+        error: 'No active subscription found',
+        code: 'NO_SUBSCRIPTION',
+        message: 'No tienes una suscripción activa. Por favor, selecciona un plan para continuar.'
+      },
+      { status: 402 } // Payment Required
+    );
+  }
+
   if (error instanceof ValidationError) {
     return Response.json({ error: error.message, details: error.details }, { status: 400 });
   }
@@ -50,7 +62,12 @@ export function handleApiError(error: any): Response {
   }
   if (error instanceof PlanLimitError) {
     return Response.json(
-      { error: error.message, current: error.current, max: error.max },
+      { 
+        error: error.message, 
+        code: 'PLAN_LIMIT_EXCEEDED',
+        current: error.current, 
+        max: error.max 
+      },
       { status: 403 }
     );
   }

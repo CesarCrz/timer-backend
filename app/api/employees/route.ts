@@ -104,10 +104,14 @@ _Powered by Timer_`,
       console.error('Failed to send WhatsApp invitation:', e);
     }
 
+    // Construir link de invitación
+    const invitationLink = `${process.env.FRONTEND_URL}/confirm/${businessId}/${token}/validate`;
+
     return withCors(origin, Response.json({
       ...employee,
       branches: payload.branch_ids || [],
       invitation_sent: true,
+      invitation_link: invitationLink,
     }));
   } catch (error) {
     return handleApiError(error);
