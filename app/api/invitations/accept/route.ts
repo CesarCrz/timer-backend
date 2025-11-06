@@ -38,6 +38,27 @@ export async function POST(request: Request) {
       .eq('id', invitation.employee_id)
       .single();
 
+    // Obtener branch_ids de la invitación (guardados como JSONB)
+    const branchIds = invitation.branch_ids || [];
+    
+    // Crear las relaciones employee_branches solo cuando acepta la invitación
+    if (branchIds.length > 0) {
+      const rows = branchIds.map((bid: string) => ({ 
+        employee_id: employee.id, 
+        branch_id: bid, 
+        status: 'active' 
+      }));
+      
+      const { error: branchError } = await supabase
+        .from('employee_branches')
+        .insert(rows);
+      
+      if (branchError) {
+        console.error('Error inserting employee_branches:', branchError);
+        throw new Error(branchError.message || 'Error al asignar sucursales');
+      }
+    }
+
     await supabase
       .from('employees')
       .update({ status: 'active', terms_accepted_at: nowIso })
