@@ -48,17 +48,80 @@ export function handleApiError(error: any): Response {
     );
   }
 
+  // Manejar errores de validación de Zod
+  if (error?.name === 'ZodError' || error?.issues) {
+    const issues = error.issues || [];
+    const messages = issues.map((issue: any) => {
+      const field = issue.path.join('.');
+      let message = issue.message;
+      
+      // Mensajes más amigables en español
+      if (issue.code === 'too_small') {
+        if (issue.type === 'string') {
+          message = `${field === 'name' ? 'El nombre' : `El campo ${field}`} debe tener al menos ${issue.minimum} caracteres`;
+        } else if (issue.type === 'number') {
+          message = `${field === 'name' ? 'El valor' : `El campo ${field}`} debe ser mayor o igual a ${issue.minimum}`;
+        }
+      } else if (issue.code === 'too_big') {
+        if (issue.type === 'string') {
+          message = `${field === 'name' ? 'El nombre' : `El campo ${field}`} no puede tener más de ${issue.maximum} caracteres`;
+        } else if (issue.type === 'number') {
+          message = `${field === 'name' ? 'El valor' : `El campo ${field}`} debe ser menor o igual a ${issue.maximum}`;
+        }
+      } else if (issue.code === 'invalid_type') {
+        message = `${field === 'name' ? 'El nombre' : `El campo ${field}`} tiene un tipo de dato inválido`;
+      } else if (issue.code === 'invalid_string') {
+        if (issue.validation === 'email') {
+          message = 'El correo electrónico no es válido';
+        } else if (issue.validation === 'url') {
+          message = 'La URL no es válida';
+        } else if (issue.validation === 'regex') {
+          message = `${field === 'name' ? 'El formato' : `El formato del campo ${field}`} no es válido`;
+        }
+      }
+      
+      return message;
+    });
+    
+    const mainMessage = messages.length === 1 
+      ? messages[0] 
+      : `Hay ${messages.length} errores de validación: ${messages.join('; ')}`;
+    
+    return Response.json({ 
+      error: mainMessage,
+      code: 'VALIDATION_ERROR',
+      details: issues.map((issue: any) => ({
+        field: issue.path.join('.'),
+        message: issue.message,
+        code: issue.code
+      }))
+    }, { status: 400 });
+  }
+
   if (error instanceof ValidationError) {
-    return Response.json({ error: error.message, details: error.details }, { status: 400 });
+    return Response.json({ 
+      error: error.message, 
+      code: 'VALIDATION_ERROR',
+      details: error.details 
+    }, { status: 400 });
   }
   if (error instanceof UnauthorizedError) {
-    return Response.json({ error: error.message }, { status: 401 });
+    return Response.json({ 
+      error: error.message,
+      code: 'UNAUTHORIZED'
+    }, { status: 401 });
   }
   if (error instanceof ForbiddenError) {
-    return Response.json({ error: error.message }, { status: 403 });
+    return Response.json({ 
+      error: error.message,
+      code: 'FORBIDDEN'
+    }, { status: 403 });
   }
   if (error instanceof NotFoundError) {
-    return Response.json({ error: error.message }, { status: 404 });
+    return Response.json({ 
+      error: error.message,
+      code: 'NOT_FOUND'
+    }, { status: 404 });
   }
   if (error instanceof PlanLimitError) {
     return Response.json(
@@ -71,7 +134,12 @@ export function handleApiError(error: any): Response {
       { status: 403 }
     );
   }
-  return Response.json({ error: 'Internal server error' }, { status: 500 });
+  
+  // Error genérico del servidor
+  return Response.json({ 
+    error: error?.message || 'Error interno del servidor',
+    code: 'INTERNAL_ERROR'
+  }, { status: 500 });
 }
 
 

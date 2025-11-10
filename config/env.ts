@@ -20,6 +20,11 @@ export const env = {
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET || '',
 
   RESEND_API_KEY: process.env.RESEND_API_KEY || '',
+
+  // Meta/WhatsApp API (para mensajes de plantilla)
+  META_JWT_TOKEN: process.env.META_JWT_TOKEN || '',
+  META_NUMBER_ID: process.env.META_NUMBER_ID || '',
+  META_API_VERSION: process.env.META_API_VERSION || 'v22.0',
 };
 
 export function assertProdEnv() {

@@ -10,26 +10,24 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "next": "^15.0.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "zod": "^3.23.8",
     "@supabase/ssr": "^0.5.1",
-    "stripe": "^15.11.0",
-    "lru-cache": "^10.2.2",
+    "axios": "^1.13.2",
     "dayjs": "^1.11.11",
     "exceljs": "^4.4.0",
-    "puppeteer": "^22.15.0"
+    "lru-cache": "^10.2.2",
+    "next": "^15.0.0",
+    "puppeteer": "^22.15.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "stripe": "^15.11.0",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
-    "typescript": "^5.5.4",
     "eslint": "^8.57.0",
-    "eslint-config-next": "^15.0.0"
+    "eslint-config-next": "^15.0.0",
+    "typescript": "^5.5.4"
   }
 }
-
-
-

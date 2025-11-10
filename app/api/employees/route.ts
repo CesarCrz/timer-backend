@@ -154,48 +154,49 @@ export async function POST(request: Request) {
       branch_ids: payload.branch_ids || [] // Guardar como JSONB
     });
 
-    // Send WhatsApp via BuilderBot
+    // Send WhatsApp invitation via Meta Template Message API
     try {
       const { data: business } = await supabase
         .from('businesses')
         .select('name')
         .eq('id', businessId)
         .single();
+      
       const { data: branches } = await supabase
         .from('branches')
         .select('name')
-        .in('id', payload.branch_ids);
+        .in('id', payload.branch_ids || []);
 
-      const invitationUrl = `${process.env.FRONTEND_URL}/confirm/${businessId}/${token}/validate`;
-      const messageText = `🎉 Hola ${employee.full_name}!
-
-Has sido invitado a trabajar en:
-🏢 *${business.name}*
-📍 Sucursales: ${(branches || []).map((b: any) => b.name).join(', ')}
-
-Este enlace expira en 24 horas.
-
-_Powered by Timer_`;
-
-      await fetch(`${process.env.BUILDERBOT_API_URL}/v1/messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.BUILDERBOT_API_SECRET}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          number: employee.phone,
-          message: messageText,
-          buttonUrl: invitationUrl,
-          buttonText: 'Unirme al Equipo',
-        }),
+      // Meta solo permite una variable al final de la URL
+      // Usamos formato: /invite/{token} donde el token es único y contiene toda la info necesaria
+      const invitationUrl = `${process.env.FRONTEND_URL}/invite/${token}`;
+      
+      // Importar función de envío de plantilla
+      const { sendEmployeeInvitation } = await import('@/lib/meta/template-messages');
+      
+      const result = await sendEmployeeInvitation({
+        phone: employee.phone,
+        employeeName: employee.full_name,
+        businessName: business?.name || 'Tu Negocio',
+        branches: (branches || []).map((b: any) => b.name),
+        invitationUrl,
+        templateName: 'employee_invitation', // Nombre de la plantilla en Meta
       });
-    } catch (e) {
-      console.error('Failed to send WhatsApp invitation:', e);
+
+      if (!result.success) {
+        console.error('Error al enviar invitación por WhatsApp:', result.error);
+        // No fallar la creación del empleado si falla el envío del mensaje
+      } else {
+        console.log(`✅ Invitación enviada exitosamente a ${employee.phone}`);
+      }
+    } catch (e: any) {
+      console.error('Failed to send WhatsApp invitation:', e.message || e);
+      // No fallar la creación del empleado si falla el envío del mensaje
     }
 
     // Construir link de invitación
-    const invitationLink = `${process.env.FRONTEND_URL}/confirm/${businessId}/${token}/validate`;
+    // Meta solo permite una variable al final de la URL, por eso usamos /invite/{token}
+    const invitationLink = `${process.env.FRONTEND_URL}/invite/${token}`;
 
     return withCors(origin, Response.json({
       ...employee,
