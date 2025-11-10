@@ -35,6 +35,47 @@ export async function GET(request: Request) {
       .eq('business_id', businessId);
     if (status) query = query.eq('status', status);
     const { data: branches, count } = await query;
+
+    // Agregar conteo de empleados activos por sucursal
+    if (branches && branches.length > 0) {
+      const branchIds = branches.map(b => b.id);
+      
+      // Obtener empleados activos del negocio
+      const { data: activeEmployees } = await supabase
+        .from('employees')
+        .select('id')
+        .eq('business_id', businessId)
+        .eq('status', 'active');
+      
+      const activeEmployeeIds = activeEmployees?.map(e => e.id) || [];
+      
+      // Obtener relaciones employee_branches activas solo para empleados activos
+      const { data: employeeBranches } = activeEmployeeIds.length > 0 ? await supabase
+        .from('employee_branches')
+        .select('branch_id, employee_id, status')
+        .in('branch_id', branchIds)
+        .in('employee_id', activeEmployeeIds)
+        .eq('status', 'active') : { data: [] };
+      
+      // Contar empleados activos por sucursal (empleado activo + relación activa)
+      const employeeCounts: Record<string, number> = {};
+      if (employeeBranches) {
+        employeeBranches.forEach(eb => {
+          if (eb.status === 'active') {
+            employeeCounts[eb.branch_id] = (employeeCounts[eb.branch_id] || 0) + 1;
+          }
+        });
+      }
+      
+      // Agregar active_employees_count a cada sucursal
+      const branchesWithCounts = branches.map(branch => ({
+        ...branch,
+        active_employees_count: employeeCounts[branch.id] || 0
+      }));
+      
+      return withCors(origin, Response.json({ branches: branchesWithCounts, total: count || 0 }));
+    }
+
     return withCors(origin, Response.json({ branches: branches || [], total: count || 0 }));
   } catch (error) {
     return handleApiError(error);

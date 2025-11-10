@@ -8,7 +8,7 @@ const updateSchema = z.object({
   phone: z.string().regex(/^\+[1-9]\d{1,14}$/).optional(),
   hourly_rate: z.number().positive().max(10000).optional(),
   status: z.enum(['pending', 'active', 'inactive']).optional(),
-  branch_ids: z.array(z.string().uuid()).optional(),
+  branch_ids: z.array(z.string().uuid()).optional(), // Permite array vacío para desactivar de todas las sucursales
 });
 
 export async function OPTIONS(request: Request) {
@@ -41,12 +41,56 @@ export async function PUT(request: Request, ctx: { params: { id: string } }) {
       .select()
       .single();
 
-    if (branch_ids) {
-      await supabase.from('employee_branches').delete().eq('employee_id', employeeId);
-      if (branch_ids.length) {
+    if (branch_ids !== undefined) {
+      // Obtener todas las relaciones actuales del empleado
+      const { data: currentBranches } = await supabase
+        .from('employee_branches')
+        .select('branch_id, status')
+        .eq('employee_id', employeeId);
+
+      const currentBranchIds = currentBranches?.map(eb => eb.branch_id) || [];
+      const newBranchIds = branch_ids || [];
+
+      // Sucursales a desactivar (estaban activas pero ya no están en la lista)
+      const branchesToDeactivate = currentBranchIds.filter(bid => !newBranchIds.includes(bid));
+      if (branchesToDeactivate.length > 0) {
         await supabase
           .from('employee_branches')
-          .insert(branch_ids.map((bid) => ({ employee_id: employeeId, branch_id: bid, status: 'active' })));
+          .update({ status: 'inactive' })
+          .eq('employee_id', employeeId)
+          .in('branch_id', branchesToDeactivate);
+      }
+
+      // Sucursales a activar/reactivar (están en la nueva lista)
+      const branchesToActivate = newBranchIds.filter(bid => !currentBranchIds.includes(bid));
+      if (branchesToActivate.length > 0) {
+        // Verificar si ya existen relaciones inactivas para reactivarlas
+        const { data: existingInactive } = await supabase
+          .from('employee_branches')
+          .select('branch_id')
+          .eq('employee_id', employeeId)
+          .in('branch_id', branchesToActivate)
+          .eq('status', 'inactive');
+
+        const existingInactiveIds = existingInactive?.map(eb => eb.branch_id) || [];
+        const toReactivate = branchesToActivate.filter(bid => existingInactiveIds.includes(bid));
+        const toInsert = branchesToActivate.filter(bid => !existingInactiveIds.includes(bid));
+
+        // Reactivar relaciones existentes
+        if (toReactivate.length > 0) {
+          await supabase
+            .from('employee_branches')
+            .update({ status: 'active' })
+            .eq('employee_id', employeeId)
+            .in('branch_id', toReactivate);
+        }
+
+        // Insertar nuevas relaciones
+        if (toInsert.length > 0) {
+          await supabase
+            .from('employee_branches')
+            .insert(toInsert.map((bid) => ({ employee_id: employeeId, branch_id: bid, status: 'active' })));
+        }
       }
     }
 
@@ -71,8 +115,17 @@ export async function DELETE(request: Request, ctx: { params: { id: string } }) 
       .single();
     if (!existing || existing.business_id !== businessId) throw new NotFoundError('Employee');
 
+    // Desactivar empleado (afecta a TODAS las sucursales)
     await supabase.from('employees').update({ status: 'inactive' }).eq('id', employeeId);
-    return withCors(origin, Response.json({ message: 'Employee deactivated successfully', id: employeeId }));
+    
+    // Desactivar todas las relaciones employee_branches para este empleado
+    await supabase
+      .from('employee_branches')
+      .update({ status: 'inactive' })
+      .eq('employee_id', employeeId)
+      .eq('status', 'active');
+    
+    return withCors(origin, Response.json({ message: 'Employee deactivated successfully in all branches', id: employeeId }));
   } catch (error) {
     return handleApiError(error);
   }

@@ -7,14 +7,20 @@ export async function OPTIONS(request: Request) {
   return preflight(origin);
 }
 
+/**
+ * GET /api/subscription-tiers
+ * Endpoint público (sin autenticación requerida)
+ * Retorna todos los planes de suscripción activos
+ */
 export async function GET(request: Request) {
   try {
     const origin = request.headers.get('origin');
+    // Usar Service Role para acceso público (no requiere autenticación)
     const supabase = createServiceRoleClient();
 
     const { data: tiers } = await supabase
       .from('subscription_tiers')
-      .select('id, name, price_monthly_mxn, price_yearly_mxn, max_branches, max_employees, features, display_order')
+      .select('id, name, price_monthly_mxn, price_yearly_mxn, max_branches, max_employees, features, display_order, is_active')
       .eq('is_active', true)
       .order('display_order', { ascending: true });
 
