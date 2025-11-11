@@ -4,12 +4,18 @@ import { handleApiError, UnauthorizedError } from '@/lib/utils/errors';
 import { createServiceRoleClient } from '@/lib/utils/auth';
 import { calculateDistance } from '@/lib/geolocation/haversine';
 import { limiter } from '@/lib/utils/rate-limit';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const bodySchema = z.object({
   phone: z.string().regex(/^\+[1-9]\d{1,14}$/),
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
-  action: z.enum(['check_in', 'check_out']),
+  action: z.enum(['check_in', 'check_out']).optional(), // Opcional: se determina automáticamente si no se proporciona
 });
 
 export async function OPTIONS(request: Request) {
@@ -33,7 +39,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { phone, latitude, longitude, action } = bodySchema.parse(body);
+    const { phone, latitude, longitude, action: providedAction } = bodySchema.parse(body);
 
     const supabase = createServiceRoleClient();
 
@@ -49,7 +55,37 @@ export async function POST(request: Request) {
       return withCors(origin, Response.json({ valid: false, message: 'Empleado no encontrado o inactivo' }));
     }
 
-    // 2) Fetch active assigned branches
+    // 2) Determinar automáticamente la acción si no se proporciona
+    let action = providedAction;
+    if (!action) {
+      // Buscar registro activo del día de hoy
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const todayEnd = new Date();
+      todayEnd.setHours(23, 59, 59, 999);
+
+      const { data: activeRecord } = await supabase
+        .from('attendance_records')
+        .select('id, check_in_time, check_in_latitude, check_in_longitude, check_out_time')
+        .eq('employee_id', employee.id)
+        .eq('status', 'active')
+        .gte('check_in_time', todayStart.toISOString())
+        .lte('check_in_time', todayEnd.toISOString())
+        .maybeSingle();
+
+      // Si no hay registro activo para hoy O no tiene check_in_time/lat/long → check_in
+      // Si hay registro activo con check_in_time/lat/long pero sin check_out → check_out
+      if (!activeRecord || !activeRecord.check_in_time || !activeRecord.check_in_latitude || !activeRecord.check_in_longitude) {
+        action = 'check_in';
+      } else if (activeRecord.check_in_time && activeRecord.check_in_latitude && activeRecord.check_in_longitude && !activeRecord.check_out_time) {
+        action = 'check_out';
+      } else {
+        // Si ya tiene check_out, entonces es un nuevo día → check_in
+        action = 'check_in';
+      }
+    }
+
+    // 3) Fetch active assigned branches
     const { data: employeeBranches } = await supabase
       .from('employee_branches')
       .select('branch_id, status')
@@ -65,7 +101,7 @@ export async function POST(request: Request) {
 
     const { data: branches } = await supabase
       .from('branches')
-      .select('id, name, latitude, longitude, tolerance_radius_meters')
+      .select('id, name, latitude, longitude, tolerance_radius_meters, timezone')
       .in('id', activeBranchIds)
       .eq('status', 'active');
 
@@ -116,12 +152,20 @@ export async function POST(request: Request) {
         .select()
         .single();
 
+      // Formatear hora usando timezone de la sucursal
+      const branchTimezone = closest.branch.timezone || 'America/Mexico_City';
+      // Usar dayjs para manejar correctamente el timezone
+      // Asegurar que se interprete como UTC primero, luego convertir al timezone de la sucursal
+      const checkInTime = dayjs.utc(record.check_in_time).tz(branchTimezone);
+      const formattedTime = checkInTime.format('hh:mm A');
+
       return withCors(origin, Response.json({
         valid: true,
         action: 'check_in',
         branch_name: closest.branch.name,
         time: record.check_in_time,
-        message: `✅ Check-in registrado en ${closest.branch.name} a las ${new Date(record.check_in_time).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}`,
+        timezone: branchTimezone,
+        message: `✅ Check-in registrado en ${closest.branch.name} a las ${formattedTime}`,
       }));
     }
 
@@ -157,15 +201,29 @@ export async function POST(request: Request) {
         .select()
         .single();
 
+      // Calcular horas trabajadas
       const hoursWorked = (new Date(updated.check_out_time).getTime() - new Date(updated.check_in_time).getTime()) / (1000 * 60 * 60);
+      const totalMinutes = Math.floor(hoursWorked * 60);
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      const timeWorkedFormatted = `${hours}h ${minutes}m`;
+
+      // Formatear hora usando timezone de la sucursal
+      const branchTimezone = closest.branch.timezone || 'America/Mexico_City';
+      // Usar dayjs para manejar correctamente el timezone
+      // Asegurar que se interprete como UTC primero, luego convertir al timezone de la sucursal
+      const checkOutTime = dayjs.utc(updated.check_out_time).tz(branchTimezone);
+      const formattedTime = checkOutTime.format('hh:mm A');
 
       return withCors(origin, Response.json({
         valid: true,
         action: 'check_out',
         branch_name: closest.branch.name,
         time: updated.check_out_time,
+        timezone: branchTimezone,
         hours_worked: hoursWorked.toFixed(2),
-        message: `✅ Check-out registrado en ${closest.branch.name}. Trabajaste ${hoursWorked.toFixed(2)} horas.`,
+        time_worked_formatted: timeWorkedFormatted,
+        message: `✅ Check-out registrado en ${closest.branch.name} a las ${formattedTime}. Tiempo trabajado: ${timeWorkedFormatted}.`,
       }));
     }
 

@@ -11,8 +11,34 @@ export async function GET(_request: Request, ctx: { params: Promise<{ token: str
   try {
     const origin = _request.headers.get('origin');
     const params = await Promise.resolve(ctx.params);
-    const token = params.token;
+    let token = params.token;
     if (!token) throw new ValidationError('Token is required');
+    
+    // Decodificar la URL en caso de que Meta haya codificado {{1}} como %7B%7B1%7D%7D
+    try {
+      token = decodeURIComponent(token);
+    } catch (e) {
+      // Si falla la decodificación, usar el token original
+    }
+    
+    // Si el token incluye {{1}} o %7B%7B1%7D%7D (Meta no reemplazó correctamente)
+    // Extraer solo la parte del UUID que viene después
+    if (token.includes('{{1}}') || token.includes('%7B%7B1%7D%7D')) {
+      // Buscar el UUID directamente (formato: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+      const uuidMatch = token.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+      if (uuidMatch) {
+        token = uuidMatch[1];
+      } else {
+        // Si no hay UUID, intentar extraer después de }} o %7D%7D
+        const afterBraceMatch = token.match(/(?:\}\}|%7D%7D)(.+)$/);
+        if (afterBraceMatch) {
+          token = afterBraceMatch[1];
+        }
+      }
+    }
+    
+    console.log(`🔍 [VALIDATE] Token recibido: ${params.token}`);
+    console.log(`🔍 [VALIDATE] Token procesado: ${token}`);
 
     const supabase = createServiceRoleClient();
 

@@ -25,6 +25,11 @@ export function preflight(origin: string | null): Response {
 
 function isOriginAllowed(origin: string | null): boolean {
   if (!origin) return false;
+  // En desarrollo, permitir localhost en cualquier puerto
+  const isDev = process.env.NODE_ENV !== 'production';
+  if (isDev && origin.startsWith('http://localhost:')) {
+    return true;
+  }
   return env.CORS_ALLOWED_ORIGINS.includes(origin);
 }
 

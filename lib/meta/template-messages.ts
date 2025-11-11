@@ -29,7 +29,14 @@ interface TemplateMessageParams {
  * Envía un mensaje de plantilla usando la API de Meta
  * Esto permite enviar mensajes a usuarios que no han iniciado conversación
  */
-export async function sendTemplateMessage(params: TemplateMessageParams): Promise<{ success: boolean; messageId?: string; error?: string }> {
+export async function sendTemplateMessage(params: TemplateMessageParams): Promise<{ 
+  success: boolean; 
+  messageId?: string; 
+  error?: string;
+  errorCode?: number;
+  errorType?: string;
+  fullError?: any;
+}> {
   if (!META_JWT_TOKEN || !META_NUMBER_ID) {
     throw new Error('META_JWT_TOKEN y META_NUMBER_ID deben estar configurados en las variables de entorno');
   }
@@ -52,8 +59,10 @@ export async function sendTemplateMessage(params: TemplateMessageParams): Promis
   };
 
   try {
-    console.log(`📤 Enviando mensaje de plantilla a ${params.to}`);
-    console.log(`📋 Plantilla: ${params.templateName}`);
+    console.log(`📤 [META API] Enviando mensaje de plantilla a ${params.to}`);
+    console.log(`📋 [META API] Plantilla: ${params.templateName}`);
+    console.log(`🌐 [META API] Idioma: ${params.languageCode}`);
+    console.log(`📦 [META API] Payload:`, JSON.stringify(payload, null, 2));
     
     const response = await axios.post(url, payload, {
       headers: {
@@ -63,19 +72,35 @@ export async function sendTemplateMessage(params: TemplateMessageParams): Promis
       timeout: 10000,
     });
 
-    console.log(`✅ Mensaje de plantilla enviado exitosamente`);
-    console.log(`📨 Message ID: ${response.data.messages?.[0]?.id}`);
+    console.log(`✅ [META API] Mensaje de plantilla enviado exitosamente`);
+    console.log(`📨 [META API] Message ID: ${response.data.messages?.[0]?.id}`);
+    console.log(`📊 [META API] Respuesta completa:`, JSON.stringify(response.data, null, 2));
 
     return {
       success: true,
       messageId: response.data.messages?.[0]?.id,
     };
   } catch (error: any) {
-    console.error('❌ Error al enviar mensaje de plantilla:', error.response?.data || error.message);
+    console.error('❌ [META API] Error al enviar mensaje de plantilla');
+    console.error('❌ [META API] Error completo:', error);
+    console.error('❌ [META API] Response data:', error.response?.data);
+    console.error('❌ [META API] Status:', error.response?.status);
+    console.error('❌ [META API] Headers:', error.response?.headers);
+    
+    const errorMessage = error.response?.data?.error?.message || error.message || 'Error desconocido';
+    const errorCode = error.response?.data?.error?.code;
+    const errorType = error.response?.data?.error?.type;
+    
+    console.error(`❌ [META API] Error message: ${errorMessage}`);
+    console.error(`❌ [META API] Error code: ${errorCode}`);
+    console.error(`❌ [META API] Error type: ${errorType}`);
     
     return {
       success: false,
-      error: error.response?.data?.error?.message || error.message || 'Error desconocido',
+      error: errorMessage,
+      errorCode,
+      errorType,
+      fullError: error.response?.data,
     };
   }
 }
@@ -113,8 +138,36 @@ export async function sendEmployeeInvitation(params: {
   
   // Extraer el token de la URL
   // Formato esperado: https://{dominio}/invite/{token}
+  // IMPORTANTE: La plantilla en Meta debe tener la URL como: https://timer.app/invite/{{1}}
+  // Y nosotros enviamos solo el token como parámetro, Meta reemplazará {{1}} con el token
   const urlMatch = params.invitationUrl.match(/\/invite\/([^\/]+)$/);
-  const token = urlMatch ? urlMatch[1] : params.invitationUrl.split('/').pop() || '';
+  let token = urlMatch ? urlMatch[1] : params.invitationUrl.split('/').pop() || '';
+  
+  // Decodificar la URL en caso de que Meta haya codificado {{1}} como %7B%7B1%7D%7D
+  try {
+    token = decodeURIComponent(token);
+  } catch (e) {
+    // Si falla la decodificación, usar el token original
+  }
+  
+  // Si el token incluye {{1}} o %7B%7B1%7D%7D (no fue reemplazado correctamente por Meta)
+  // Extraer solo la parte del UUID que viene después
+  if (token.includes('{{1}}') || token.includes('%7B%7B1%7D%7D')) {
+    // Buscar el UUID directamente (formato: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+    const uuidMatch = token.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+    if (uuidMatch) {
+      token = uuidMatch[1];
+    } else {
+      // Si no hay UUID, intentar extraer después de }} o %7D%7D
+      const afterBraceMatch = token.match(/(?:\}\}|%7D%7D)(.+)$/);
+      if (afterBraceMatch) {
+        token = afterBraceMatch[1];
+      }
+    }
+  }
+  
+  console.log(`🔗 [BUTTON] URL original: ${params.invitationUrl}`);
+  console.log(`🔑 [BUTTON] Token extraído: ${token}`);
   
   const buttonParameters = [
     { type: 'text' as const, text: token }, // {{1}} = token (al final de la URL)
@@ -158,7 +211,7 @@ export async function sendEmployeeInvitation(params: {
   return sendTemplateMessage({
     to: params.phone,
     templateName,
-    languageCode: 'es',
+    languageCode: 'en',
     components,
   });
 }

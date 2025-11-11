@@ -9,6 +9,7 @@ export type AttendanceRecord = {
   check_in_time: string;
   check_out_time: string;
   branch: {
+    name: string;
     business_hours_start: string;
     timezone: string;
   };
@@ -28,6 +29,7 @@ export type DailyCalculation = {
   payment_with_late: number;
   overtime_payment: number;
   total_payment: number;
+  branch_name: string;
   is_late: boolean;
 };
 
@@ -66,6 +68,7 @@ export function calculateAttendanceMetrics(record: AttendanceRecord): DailyCalcu
     payment_with_late: parseFloat(paymentWithLate.toFixed(2)),
     overtime_payment: parseFloat(overtimePayment.toFixed(2)),
     total_payment: parseFloat(totalPayment.toFixed(2)),
+    branch_name: record.branch.name,
     is_late: lateMinutes > 0,
   };
 }

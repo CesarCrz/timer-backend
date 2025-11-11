@@ -100,6 +100,11 @@ export async function PUT(request: Request, ctx: { params: { id: string } }) {
   }
 }
 
+/**
+ * DELETE /api/employees/[id]
+ * Elimina permanentemente un empleado (hard delete)
+ * ⚠️ Esta acción es irreversible y eliminará todos los registros relacionados
+ */
 export async function DELETE(request: Request, ctx: { params: { id: string } }) {
   try {
     const origin = request.headers.get('origin');
@@ -113,19 +118,24 @@ export async function DELETE(request: Request, ctx: { params: { id: string } }) 
       .select('id, business_id')
       .eq('id', employeeId)
       .single();
-    if (!existing || existing.business_id !== businessId) throw new NotFoundError('Employee');
+    
+    if (!existing || existing.business_id !== businessId) {
+      throw new NotFoundError('Employee');
+    }
 
-    // Desactivar empleado (afecta a TODAS las sucursales)
-    await supabase.from('employees').update({ status: 'inactive' }).eq('id', employeeId);
-    
-    // Desactivar todas las relaciones employee_branches para este empleado
+    // Eliminar permanentemente el empleado
+    // Las relaciones employee_branches se eliminarán automáticamente por CASCADE
+    // Los registros de asistencia (attendance_records) también se eliminarán por CASCADE
+    // Las invitaciones (employee_invitations) también se eliminarán por CASCADE
     await supabase
-      .from('employee_branches')
-      .update({ status: 'inactive' })
-      .eq('employee_id', employeeId)
-      .eq('status', 'active');
+      .from('employees')
+      .delete()
+      .eq('id', employeeId);
     
-    return withCors(origin, Response.json({ message: 'Employee deactivated successfully in all branches', id: employeeId }));
+    return withCors(origin, Response.json({ 
+      message: 'Employee deleted permanently', 
+      id: employeeId 
+    }));
   } catch (error) {
     return handleApiError(error);
   }

@@ -7,12 +7,13 @@ export async function OPTIONS(request: Request) {
   return preflight(origin);
 }
 
-export async function POST(request: Request, ctx: { params: { id: string } }) {
+export async function POST(request: Request, ctx: { params: Promise<{ id: string }> | { id: string } }) {
   try {
     const origin = request.headers.get('origin');
     const user = await getCurrentUser(request);
     const businessId = await getUserBusinessId(user.id);
-    const employeeId = ctx.params.id;
+    const params = await Promise.resolve(ctx.params);
+    const employeeId = params.id;
     const supabase = createServiceRoleClient();
 
     const { data: employee } = await supabase
@@ -70,32 +71,49 @@ export async function POST(request: Request, ctx: { params: { id: string } }) {
       .eq('id', businessId)
       .single();
 
-      const invitationUrl = `${process.env.FRONTEND_URL}/confirm/${businessId}/${token}/validate`;
-      const messageText = `🎉 Hola ${employee.full_name}!
-
-Has sido invitado a trabajar en:
-🏢 *${business.name}*
-📍 Sucursales: ${(branches || []).map((b: any) => b.name).filter(Boolean).join(', ')}
-
-Este enlace expira en 24 horas.
-
-_Powered by Timer_`;
-
-      await fetch(`${process.env.BUILDERBOT_API_URL}/v1/messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.BUILDERBOT_API_SECRET}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          number: employee.phone,
-          message: messageText,
-          buttonUrl: invitationUrl,
-          buttonText: 'Unirme al Equipo',
-        }),
+      const invitationUrl = `${process.env.FRONTEND_URL}/invite/${token}`;
+      
+      // Usar la función sendEmployeeInvitation que maneja mejor los errores y usa la API de Meta
+      const { sendEmployeeInvitation } = await import('@/lib/meta/template-messages');
+      
+      console.log(`📤 [RESEND] Intentando reenviar invitación a ${employee.full_name} (${employee.phone})`);
+      console.log(`📋 [RESEND] URL de invitación: ${invitationUrl}`);
+      console.log(`📋 [RESEND] Sucursales: ${(branches || []).map((b: any) => b.name).filter(Boolean).join(', ')}`);
+      
+      const result = await sendEmployeeInvitation({
+        phone: employee.phone,
+        employeeName: employee.full_name,
+        businessName: business?.name || 'Tu Negocio',
+        branches: (branches || []).map((b: any) => b.name),
+        invitationUrl,
+        templateName: 'employee_invitation',
       });
 
-    return withCors(origin, Response.json({ ok: true }));
+      if (!result.success) {
+        console.error(`❌ [RESEND] Error al reenviar invitación por WhatsApp`);
+        console.error(`❌ [RESEND] Error:`, result.error);
+        console.error(`❌ [RESEND] Error Code:`, result.errorCode);
+        console.error(`❌ [RESEND] Error Type:`, result.errorType);
+        console.error(`❌ [RESEND] Detalles completos:`, JSON.stringify(result, null, 2));
+        
+        return withCors(origin, Response.json({ 
+          ok: false, 
+          error: result.error || 'Error al enviar mensaje por WhatsApp',
+          errorCode: result.errorCode,
+          errorType: result.errorType,
+          message: `No se pudo enviar la invitación: ${result.error || 'Error desconocido'}`,
+          details: result
+        }, { status: 500 }));
+      }
+
+      console.log(`✅ [RESEND] Invitación reenviada exitosamente a ${employee.phone}`);
+      console.log(`📨 [RESEND] Message ID: ${result.messageId || 'N/A'}`);
+
+    return withCors(origin, Response.json({ 
+      ok: true, 
+      messageId: result.messageId,
+      message: 'Invitación reenviada exitosamente'
+    }));
   } catch (error) {
     return handleApiError(error);
   }

@@ -13,11 +13,49 @@ export async function OPTIONS(request: Request) {
   return preflight(origin);
 }
 
+// Función helper para limpiar el token
+function cleanToken(token: string): string {
+  // Decodificar la URL en caso de que Meta haya codificado {{1}} como %7B%7B1%7D%7D
+  try {
+    token = decodeURIComponent(token);
+  } catch (e) {
+    // Si falla la decodificación, usar el token original
+  }
+  
+  // Si el token incluye {{1}} o %7B%7B1%7D%7D (Meta no reemplazó correctamente)
+  // Extraer solo la parte del UUID que viene después
+  if (token.includes('{{1}}') || token.includes('%7B%7B1%7D%7D')) {
+    // Buscar el UUID directamente (formato: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+    const uuidMatch = token.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+    if (uuidMatch) {
+      token = uuidMatch[1];
+    } else {
+      // Si no hay UUID, intentar extraer después de }} o %7D%7D
+      const afterBraceMatch = token.match(/(?:\}\}|%7D%7D)(.+)$/);
+      if (afterBraceMatch) {
+        token = afterBraceMatch[1];
+      }
+    }
+  }
+  
+  return token;
+}
+
 export async function POST(request: Request) {
   try {
     const origin = request.headers.get('origin');
     const body = await request.json();
-    const { token } = acceptSchema.parse(body);
+    
+    // Procesar el token ANTES de validarlo con Zod
+    const rawToken = body.token;
+    if (!rawToken) throw new ValidationError('Token is required');
+    
+    const cleanedToken = cleanToken(rawToken);
+    console.log(`🔍 [ACCEPT] Token recibido: ${rawToken}`);
+    console.log(`🔍 [ACCEPT] Token procesado: ${cleanedToken}`);
+    
+    // Validar que el token limpiado sea un UUID válido
+    const { token } = acceptSchema.parse({ token: cleanedToken, terms_accepted: body.terms_accepted });
 
     const supabase = createServiceRoleClient();
     const nowIso = new Date().toISOString();

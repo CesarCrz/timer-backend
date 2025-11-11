@@ -51,6 +51,11 @@ export async function PUT(request: Request, ctx: { params: { id: string } }) {
   }
 }
 
+/**
+ * DELETE /api/branches/[id]
+ * Elimina permanentemente una sucursal (hard delete)
+ * ⚠️ Esta acción es irreversible y eliminará todos los registros relacionados
+ */
 export async function DELETE(request: Request, ctx: { params: { id: string } }) {
   try {
     const origin = request.headers.get('origin');
@@ -64,14 +69,23 @@ export async function DELETE(request: Request, ctx: { params: { id: string } }) 
       .select('id, business_id')
       .eq('id', branchId)
       .single();
-    if (!existing || existing.business_id !== businessId) throw new NotFoundError('Branch');
+    
+    if (!existing || existing.business_id !== businessId) {
+      throw new NotFoundError('Branch');
+    }
 
+    // Eliminar permanentemente la sucursal
+    // Las relaciones employee_branches se eliminarán automáticamente por CASCADE
+    // Los registros de asistencia (attendance_records) también se eliminarán por CASCADE
     await supabase
       .from('branches')
-      .update({ status: 'inactive' })
+      .delete()
       .eq('id', branchId);
 
-    return withCors(origin, Response.json({ message: 'Branch deactivated successfully', id: branchId }));
+    return withCors(origin, Response.json({ 
+      message: 'Branch deleted permanently', 
+      id: branchId 
+    }));
   } catch (error) {
     return handleApiError(error);
   }

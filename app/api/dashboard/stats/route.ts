@@ -1,6 +1,12 @@
 import { withCors, preflight } from '@/lib/utils/cors';
 import { createServiceRoleClient, getCurrentUser, getUserBusinessId } from '@/lib/utils/auth';
 import { handleApiError } from '@/lib/utils/errors';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 export async function OPTIONS(request: Request) {
   const origin = request.headers.get('origin');
@@ -45,15 +51,40 @@ export async function GET(request: Request) {
       .eq('business_id', businessId)
       .eq('status', 'active');
 
-    // Llegadas tarde hoy (simplificado - contamos registros completados hoy)
-    // TODO: Implementar lógica real de tardanza basada en business_hours_start
-    const { count: lateArrivals } = employeeIds.length > 0 ? await supabase
-      .from('attendance_records')
-      .select('id', { count: 'exact' })
-      .gte('check_in_time', today.toISOString())
-      .lte('check_in_time', todayEnd.toISOString())
-      .eq('status', 'completed')
-      .in('employee_id', employeeIds) : { count: 0 };
+    // Llegadas tarde hoy - calcular basándose en business_hours_start
+    let lateArrivalsCount = 0;
+    if (employeeIds.length > 0) {
+      const { data: todayRecords } = await supabase
+        .from('attendance_records')
+        .select(`
+          id,
+          check_in_time,
+          branch:branches(business_hours_start, timezone)
+        `)
+        .gte('check_in_time', today.toISOString())
+        .lte('check_in_time', todayEnd.toISOString())
+        .in('employee_id', employeeIds);
+      
+      if (todayRecords) {
+        for (const record of todayRecords) {
+          if (!record.branch || !record.branch.business_hours_start) continue;
+          
+          const branchTimezone = record.branch.timezone || 'America/Mexico_City';
+          const checkInTime = dayjs(record.check_in_time).tz(branchTimezone);
+          const [startHour, startMinute] = record.branch.business_hours_start.split(':');
+          const scheduledStart = checkInTime
+            .clone()
+            .hour(parseInt(startHour))
+            .minute(parseInt(startMinute))
+            .second(0)
+            .millisecond(0);
+          
+          if (checkInTime.isAfter(scheduledStart)) {
+            lateArrivalsCount++;
+          }
+        }
+      }
+    }
 
     // Empleados activos ahora (check-ins sin check-out)
     const { data: activeNow } = employeeIds.length > 0 ? await supabase
@@ -62,13 +93,13 @@ export async function GET(request: Request) {
         id,
         check_in_time,
         employee:employees(id, full_name),
-        branch:branches(id, name)
+        branch:branches(id, name, timezone)
       `)
       .eq('status', 'active')
       .in('employee_id', employeeIds)
       .limit(10) : { data: [] };
 
-    // Datos semanales simplificados (últimos 7 días)
+    // Datos semanales (últimos 7 días) - calcular on_time, late, absent
     const weekStart = new Date(today);
     weekStart.setDate(today.getDate() - 7);
     
@@ -81,34 +112,78 @@ export async function GET(request: Request) {
       const dayEnd = new Date(date);
       dayEnd.setHours(23, 59, 59, 999);
 
-      const { count: completed } = await supabase
+      const { data: dayRecords } = await supabase
         .from('attendance_records')
-        .select('id', { count: 'exact' })
-        .eq('status', 'completed')
+        .select(`
+          id,
+          check_in_time,
+          status,
+          branch:branches(business_hours_start, timezone)
+        `)
         .gte('check_in_time', dayStart.toISOString())
-        .lte('check_in_time', dayEnd.toISOString());
+        .lte('check_in_time', dayEnd.toISOString())
+        .in('employee_id', employeeIds.length > 0 ? employeeIds : ['00000000-0000-0000-0000-000000000000']); // Si no hay empleados, usar UUID inválido para que no retorne nada
+
+      let onTime = 0;
+      let late = 0;
+      
+      if (dayRecords) {
+        for (const record of dayRecords) {
+          if (!record.branch || !record.branch.business_hours_start) continue;
+          
+          const branchTimezone = record.branch.timezone || 'America/Mexico_City';
+          const checkInTime = dayjs(record.check_in_time).tz(branchTimezone);
+          const [startHour, startMinute] = record.branch.business_hours_start.split(':');
+          const scheduledStart = checkInTime
+            .clone()
+            .hour(parseInt(startHour))
+            .minute(parseInt(startMinute))
+            .second(0)
+            .millisecond(0);
+          
+          if (checkInTime.isAfter(scheduledStart)) {
+            late++;
+          } else {
+            onTime++;
+          }
+        }
+      }
+      
+      // Absent = empleados activos - (on_time + late)
+      const absent = Math.max(0, (totalEmployees || 0) - (onTime + late));
 
       weeklyChart.push({
         day: date.toLocaleDateString('es-MX', { weekday: 'short' }),
-        on_time: completed || 0,
-        late: 0, // Simplificado por ahora
-        absent: 0, // Simplificado por ahora
+        on_time: onTime,
+        late: late,
+        absent: absent,
       });
     }
 
     return withCors(origin, Response.json({
       today: {
         active_employees: activeEmployees || 0,
-        late_arrivals: lateArrivals || 0,
+        late_arrivals: lateArrivalsCount,
         total_employees: totalEmployees || 0,
       },
       weekly_chart: weeklyChart,
-      active_now: (activeNow || []).map((record: any) => ({
-        id: record.id,
-        name: record.employee?.full_name || 'Empleado',
-        branch: record.branch?.name || 'Sucursal',
-        check_in_time: record.check_in_time,
-      })),
+      active_now: (activeNow || []).map((record: any) => {
+        const branchTimezone = record.branch?.timezone || 'America/Mexico_City';
+        const checkInTime = dayjs.utc(record.check_in_time).tz(branchTimezone);
+        const now = dayjs().tz(branchTimezone);
+        const durationMinutes = now.diff(checkInTime, 'minute');
+        const hours = Math.floor(durationMinutes / 60);
+        const minutes = durationMinutes % 60;
+        const durationFormatted = `${hours}h ${minutes}m`;
+        
+        return {
+          id: record.id,
+          name: record.employee?.full_name || 'Empleado',
+          branch: record.branch?.name || 'Sucursal',
+          check_in_time: checkInTime.format('hh:mm A'),
+          duration: durationFormatted,
+        };
+      }),
     }));
   } catch (error) {
     return handleApiError(error);

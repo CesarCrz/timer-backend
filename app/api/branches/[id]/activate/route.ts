@@ -131,10 +131,18 @@ export async function PUT(request: Request, ctx: { params: { id: string } }) {
 
     // Reactivar las relaciones employee_branches para esta sucursal
     if (employeeIdsToReactivate.length > 0) {
+      // Reactivar las relaciones employee_branches
       await supabase
         .from('employee_branches')
         .update({ status: 'active' })
         .eq('branch_id', branchId)
+        .eq('status', 'inactive');
+      
+      // Reactivar los empleados en la tabla employees (solo los que están inactivos)
+      await supabase
+        .from('employees')
+        .update({ status: 'active' })
+        .in('id', uniqueEmployeeIds)
         .eq('status', 'inactive');
     }
 
