@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
         
         const { data: business } = await supabase
           .from('businesses')
-          .select('*, owner:auth.users(email)')
+          .select('id, owner_id')
           .eq('id', session.metadata?.business_id)
           .single();
         
@@ -78,8 +78,21 @@ export async function POST(request: NextRequest) {
           });
         }
         
+        // Obtener el email del owner usando auth.admin
+        let ownerEmail: string | null = null;
+        if (business?.owner_id) {
+          try {
+            const { data: userData, error: userError } = await supabase.auth.admin.getUserById(business.owner_id);
+            if (!userError && userData?.user?.email) {
+              ownerEmail = userData.user.email;
+            }
+          } catch (error) {
+            console.error('Error obteniendo email del owner:', error);
+          }
+        }
+        
         // Enviar correo de confirmación
-        if (business && tier && business.owner?.email) {
+        if (business && tier && ownerEmail) {
           try {
             const renewalDate = dayjs(subscription.current_period_end * 1000).format('DD/MM/YYYY');
             const nextBillingDate = dayjs(subscription.current_period_end * 1000).format('DD/MM/YYYY');
@@ -98,7 +111,7 @@ export async function POST(request: NextRequest) {
             });
             
             await sendEmail({
-              to: business.owner.email,
+              to: ownerEmail,
               subject,
               html,
             });
