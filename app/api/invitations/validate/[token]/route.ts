@@ -7,11 +7,11 @@ export async function OPTIONS(request: Request) {
   return preflight(origin);
 }
 
-export async function GET(_request: Request, ctx: { params: Promise<{ token: string }> | { token: string } }) {
+export async function GET(_request: Request, ctx: { params: Promise<{ token: string }> }) {
   try {
     const origin = _request.headers.get('origin');
-    const params = await Promise.resolve(ctx.params);
-    let token = params.token;
+    const { token: tokenParam } = await ctx.params;
+    let token = tokenParam;
     if (!token) throw new ValidationError('Token is required');
     
     // Decodificar la URL en caso de que Meta haya codificado {{1}} como %7B%7B1%7D%7D
@@ -37,7 +37,7 @@ export async function GET(_request: Request, ctx: { params: Promise<{ token: str
       }
     }
     
-    console.log(`🔍 [VALIDATE] Token recibido: ${params.token}`);
+    console.log(`🔍 [VALIDATE] Token recibido: ${tokenParam}`);
     console.log(`🔍 [VALIDATE] Token procesado: ${token}`);
 
     const supabase = createServiceRoleClient();

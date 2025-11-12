@@ -12,12 +12,13 @@ export async function OPTIONS(request: Request) {
  * Desactiva un empleado (soft delete)
  * Cambia el status a 'inactive' y desactiva todas sus relaciones con sucursales
  */
-export async function PUT(request: Request, ctx: { params: { id: string } }) {
+export async function PUT(request: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const origin = request.headers.get('origin');
     const user = await getCurrentUser(request);
     const businessId = await getUserBusinessId(user.id);
-    const employeeId = ctx.params.id;
+    const { id } = await ctx.params;
+    const employeeId = id;
     const supabase = createServiceRoleClient();
 
     const { data: existing } = await supabase

@@ -12,12 +12,13 @@ export async function OPTIONS(request: Request) {
  * Reactiva una sucursal desactivada
  * Valida límites de plan antes de reactivar
  */
-export async function PUT(request: Request, ctx: { params: { id: string } }) {
+export async function PUT(request: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const origin = request.headers.get('origin');
     const user = await getCurrentUser(request);
     const businessId = await getUserBusinessId(user.id);
-    const branchId = ctx.params.id;
+    const { id } = await ctx.params;
+    const branchId = id;
 
     const supabase = createServiceRoleClient();
 

@@ -12,13 +12,13 @@ export async function OPTIONS(request: Request) {
  * Desactiva un empleado de una sucursal específica
  * Solo afecta a esa relación employee_branches, no al empleado en otras sucursales
  */
-export async function DELETE(request: Request, ctx: { params: { id: string; branchId: string } }) {
+export async function DELETE(request: Request, ctx: { params: Promise<{ id: string; branchId: string }> }) {
   try {
     const origin = request.headers.get('origin');
     const user = await getCurrentUser(request);
     const businessId = await getUserBusinessId(user.id);
-    const employeeId = ctx.params.id;
-    const branchId = ctx.params.branchId;
+    const { id, branchId } = await ctx.params;
+    const employeeId = id;
 
     const supabase = createServiceRoleClient();
     

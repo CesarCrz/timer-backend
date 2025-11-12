@@ -7,13 +7,13 @@ export async function OPTIONS(request: Request) {
   return preflight(origin);
 }
 
-export async function POST(request: Request, ctx: { params: Promise<{ id: string }> | { id: string } }) {
+export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const origin = request.headers.get('origin');
     const user = await getCurrentUser(request);
     const businessId = await getUserBusinessId(user.id);
-    const params = await Promise.resolve(ctx.params);
-    const employeeId = params.id;
+    const { id } = await ctx.params;
+    const employeeId = id;
     const supabase = createServiceRoleClient();
 
     const { data: employee } = await supabase

@@ -16,12 +16,13 @@ export async function OPTIONS(request: Request) {
   return preflight(origin);
 }
 
-export async function PUT(request: Request, ctx: { params: { id: string } }) {
+export async function PUT(request: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const origin = request.headers.get('origin');
     const user = await getCurrentUser(request);
     const businessId = await getUserBusinessId(user.id);
-    const employeeId = ctx.params.id;
+    const { id } = await ctx.params;
+    const employeeId = id;
     const body = await request.json();
     const updates = updateSchema.parse(body);
 
@@ -105,12 +106,13 @@ export async function PUT(request: Request, ctx: { params: { id: string } }) {
  * Elimina permanentemente un empleado (hard delete)
  * ⚠️ Esta acción es irreversible y eliminará todos los registros relacionados
  */
-export async function DELETE(request: Request, ctx: { params: { id: string } }) {
+export async function DELETE(request: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const origin = request.headers.get('origin');
     const user = await getCurrentUser(request);
     const businessId = await getUserBusinessId(user.id);
-    const employeeId = ctx.params.id;
+    const { id } = await ctx.params;
+    const employeeId = id;
 
     const supabase = createServiceRoleClient();
     const { data: existing } = await supabase

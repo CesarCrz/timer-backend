@@ -12,12 +12,13 @@ export async function OPTIONS(request: Request) {
  * Reactiva un empleado desactivado
  * Valida límites de plan antes de reactivar (permite activar uno por uno hasta el límite)
  */
-export async function PUT(request: Request, ctx: { params: { id: string } }) {
+export async function PUT(request: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const origin = request.headers.get('origin');
     const user = await getCurrentUser(request);
     const businessId = await getUserBusinessId(user.id);
-    const employeeId = ctx.params.id;
+    const { id } = await ctx.params;
+    const employeeId = id;
 
     const supabase = createServiceRoleClient();
 
