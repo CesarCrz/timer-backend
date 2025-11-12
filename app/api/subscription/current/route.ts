@@ -35,7 +35,20 @@ export async function GET(request: Request) {
     }
 
     // Obtener tier con límites
-    const tier = subscription.tier;
+    // Supabase puede retornar tier como array o objeto
+    const tierData = subscription.tier;
+    if (!tierData || Array.isArray(tierData)) {
+      return withCors(origin, Response.json({
+        has_subscription: false,
+        plan_name: null,
+        max_branches: 0,
+        max_employees: 0,
+        current_branches: 0,
+        current_employees: 0,
+      }));
+    }
+
+    const tier = Array.isArray(tierData) ? tierData[0] : tierData;
     if (!tier) {
       return withCors(origin, Response.json({
         has_subscription: false,
@@ -62,9 +75,9 @@ export async function GET(request: Request) {
 
     return withCors(origin, Response.json({
       has_subscription: true,
-      plan_name: tier.name,
-      max_branches: tier.max_branches,
-      max_employees: tier.max_employees,
+      plan_name: tier.name || null,
+      max_branches: tier.max_branches || 0,
+      max_employees: tier.max_employees || 0,
       current_branches: branchesCount || 0,
       current_employees: employeesCount || 0,
     }));

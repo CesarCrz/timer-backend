@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
           }
         }
         
-        // Enviar correo de confirmación
+        // Enviar correo de confirmación solo si tenemos todos los datos necesarios
         if (business && tier && ownerEmail) {
           try {
             const renewalDate = dayjs(subscription.current_period_end * 1000).format('DD/MM/YYYY');
@@ -99,11 +99,11 @@ export async function POST(request: NextRequest) {
             const features = tier.features && Array.isArray(tier.features) ? tier.features : [];
             
             const { subject, html } = renderTemplate('subscription-confirmed', {
-              planName: tier.name,
-              priceMxn: parseFloat(tier.price_monthly_mxn).toFixed(2),
+              planName: tier.name || 'Plan',
+              priceMxn: tier.price_monthly_mxn ? parseFloat(String(tier.price_monthly_mxn)).toFixed(2) : '0.00',
               renewalDate,
-              maxEmployees: tier.max_employees,
-              maxBranches: tier.max_branches,
+              maxEmployees: tier.max_employees || 0,
+              maxBranches: tier.max_branches || 0,
               features,
               nextBillingDate,
               dashboardUrl: `${process.env.FRONTEND_URL || 'https://timer.app'}/dashboard`,

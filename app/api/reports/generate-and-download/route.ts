@@ -125,7 +125,7 @@ export async function POST(request: Request) {
     if (params.employee_ids && params.employee_ids.length === 1) {
       reportType = 'personal';
       const emp = Object.values(byEmployee)[0] as any;
-      if (emp) {
+      if (emp && emp.employee) {
         employeeName = emp.employee.full_name;
         employeeId = params.employee_ids[0];
         employeeEmail = undefined; // La tabla employees no tiene email
@@ -143,18 +143,20 @@ export async function POST(request: Request) {
       }
     }
     
-    const reportData = Object.values(byEmployee).map((group: any) => {
-      const daily = group.records.map((r: any) => calculateAttendanceMetrics(r));
-      const totalHours = daily.reduce((s: number, d: any) => s + d.hours_worked, 0);
-      const totalLateMinutes = daily.reduce((s: number, d: any) => s + d.late_minutes, 0);
-      const totalOvertime = daily.reduce((s: number, d: any) => s + d.overtime_hours, 0);
-      const totalPayment = daily.reduce((s: number, d: any) => s + d.total_payment, 0);
-      return {
-        employee_name: group.employee.full_name,
-        employee_id: group.records[0]?.employee_id,
-        employee_email: undefined, // La tabla employees no tiene email
-        employee_phone: group.employee.phone,
-        hourly_rate: group.employee.hourly_rate,
+    const reportData = Object.values(byEmployee)
+      .filter((group: any) => group.employee) // Filtrar grupos sin employee
+      .map((group: any) => {
+        const daily = group.records.map((r: any) => calculateAttendanceMetrics(r));
+        const totalHours = daily.reduce((s: number, d: any) => s + d.hours_worked, 0);
+        const totalLateMinutes = daily.reduce((s: number, d: any) => s + d.late_minutes, 0);
+        const totalOvertime = daily.reduce((s: number, d: any) => s + d.overtime_hours, 0);
+        const totalPayment = daily.reduce((s: number, d: any) => s + d.total_payment, 0);
+        return {
+          employee_name: group.employee?.full_name || 'N/A',
+          employee_id: group.records[0]?.employee_id,
+          employee_email: undefined, // La tabla employees no tiene email
+          employee_phone: group.employee?.phone || undefined,
+          hourly_rate: group.employee?.hourly_rate || 0,
         daily_breakdown: daily,
         summary: {
           total_days: daily.length,

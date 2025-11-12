@@ -35,12 +35,16 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
     if (!existing || existing.business_id !== businessId) throw new NotFoundError('Employee');
 
     const { branch_ids, ...empUpdates } = updates;
-    const { data: updated } = await supabase
+    const { data: updated, error: updateError } = await supabase
       .from('employees')
       .update(empUpdates)
       .eq('id', employeeId)
       .select()
       .single();
+
+    if (updateError || !updated) {
+      throw new NotFoundError('Employee');
+    }
 
     if (branch_ids !== undefined) {
       // Obtener todas las relaciones actuales del empleado

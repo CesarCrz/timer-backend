@@ -52,8 +52,8 @@ export async function POST(request: Request) {
       const totalOvertime = daily.reduce((s: number, d: any) => s + d.overtime_hours, 0);
       const totalPayment = daily.reduce((s: number, d: any) => s + d.total_payment, 0);
       return {
-        employee_name: group.employee.full_name,
-        hourly_rate: group.employee.hourly_rate,
+        employee_name: group.employee?.full_name || 'N/A',
+        hourly_rate: group.employee?.hourly_rate || 0,
         daily_breakdown: daily,
         summary: {
           total_days: daily.length,

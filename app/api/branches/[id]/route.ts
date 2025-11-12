@@ -40,12 +40,16 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
 
     if (!existing || existing.business_id !== businessId) throw new NotFoundError('Branch');
 
-    const { data: updated } = await supabase
+    const { data: updated, error: updateError } = await supabase
       .from('branches')
       .update(updates)
       .eq('id', branchId)
       .select()
       .single();
+
+    if (updateError || !updated) {
+      throw new NotFoundError('Branch');
+    }
 
     return withCors(origin, Response.json(updated));
   } catch (error) {

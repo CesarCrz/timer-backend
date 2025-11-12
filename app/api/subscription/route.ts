@@ -23,7 +23,20 @@ export async function GET(request: Request) {
       .maybeSingle();
 
     // Si no hay suscripción, retornar estructura vacía
-    if (!subscription || !subscription.tier) {
+    if (!subscription || !subscription.tier || Array.isArray(subscription.tier)) {
+      return withCors(origin, Response.json({
+        current_tier: null,
+        current_usage: {
+          branches: 0,
+          employees: 0,
+        },
+        stripe_subscription: null,
+      }));
+    }
+
+    // Type guard: asegurar que tier es un objeto, no un array
+    const tier = Array.isArray(subscription.tier) ? subscription.tier[0] : subscription.tier;
+    if (!tier) {
       return withCors(origin, Response.json({
         current_tier: null,
         current_usage: {
@@ -49,12 +62,12 @@ export async function GET(request: Request) {
 
     return withCors(origin, Response.json({
       current_tier: {
-        id: subscription.tier.id,
-        name: subscription.tier.name,
-        price_monthly: subscription.tier.price_monthly_mxn,
-        price_yearly: subscription.tier.price_yearly_mxn,
-        max_branches: subscription.tier.max_branches,
-        max_employees: subscription.tier.max_employees,
+        id: tier.id,
+        name: tier.name,
+        price_monthly: tier.price_monthly_mxn,
+        price_yearly: tier.price_yearly_mxn,
+        max_branches: tier.max_branches,
+        max_employees: tier.max_employees,
       },
       current_usage: {
         branches: branchesCount || 0,
