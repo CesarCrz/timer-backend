@@ -9,7 +9,7 @@ export async function OPTIONS(request: Request) {
   return preflight(origin);
 }
 
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const origin = request.headers.get('origin');
     const user = await getCurrentUser(request);
@@ -17,10 +17,11 @@ export async function GET(request: Request, { params }: { params: { id: string }
     const supabase = createServiceRoleClient();
 
     // Obtener el reporte del historial
+    const { id } = await params;
     const { data: reportHistory, error: historyError } = await supabase
       .from('report_history')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .eq('business_id', businessId)
       .single();
 
