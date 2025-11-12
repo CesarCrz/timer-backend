@@ -191,20 +191,134 @@ export async function POST(request: Request) {
         employeePhone,
       });
       const puppeteer = await import('puppeteer');
-      const browser = await puppeteer.launch({ 
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-        headless: true,
-      });
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-      const pdf = await page.pdf({ 
-        printBackground: true, 
-        format: 'A4',
-        margin: { top: '20mm', right: '15mm', bottom: '20mm', left: '15mm' },
-      });
-      await browser.close();
-      fileBytes = pdf instanceof Uint8Array ? pdf : new Uint8Array(pdf as any);
-      contentType = 'application/pdf';
+      
+      // Configuración mejorada para Mac y otros sistemas
+      const launchOptions: any = {
+        headless: 'new', // Usar nuevo modo headless (más estable)
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--disable-gpu',
+          '--disable-web-security',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-extensions',
+          '--no-first-run',
+          '--no-default-browser-check',
+          '--disable-default-apps',
+        ],
+        timeout: 60000, // 60 segundos timeout
+        protocolTimeout: 120000, // Timeout para protocolo (WebSocket)
+      };
+
+      // Configuración específica para Mac
+      if (process.platform === 'darwin') {
+        try {
+          const executablePath = puppeteer.executablePath();
+          if (executablePath) {
+            launchOptions.executablePath = executablePath;
+            console.log('Usando Chromium en:', executablePath);
+          }
+        } catch (e) {
+          console.warn('No se pudo obtener executablePath, usando default');
+        }
+        // No usar --single-process en Mac, puede causar problemas
+        launchOptions.args.push('--disable-background-timer-throttling');
+        launchOptions.args.push('--disable-backgrounding-occluded-windows');
+        launchOptions.args.push('--disable-renderer-backgrounding');
+      }
+
+      let browser;
+      let page;
+      try {
+        console.log('Iniciando Puppeteer con opciones:', JSON.stringify(launchOptions, null, 2));
+        browser = await puppeteer.launch(launchOptions);
+        console.log('Puppeteer iniciado correctamente, URL:', browser.wsEndpoint());
+        
+        // Esperar un momento para que el navegador esté completamente listo
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        page = await browser.newPage();
+        console.log('Página creada');
+        
+        // Configurar viewport y timeouts
+        await page.setViewport({ width: 1200, height: 800 });
+        page.setDefaultTimeout(30000);
+        page.setDefaultNavigationTimeout(30000);
+        
+        console.log('Estableciendo contenido HTML...');
+        await page.setContent(html, { 
+          waitUntil: 'networkidle0',
+          timeout: 30000 
+        });
+        console.log('Contenido HTML establecido');
+        
+        // Esperar un momento adicional para que todo se renderice
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        console.log('Generando PDF...');
+        const pdf = await page.pdf({ 
+          printBackground: true, 
+          format: 'A4',
+          margin: { top: '20mm', right: '15mm', bottom: '20mm', left: '15mm' },
+          timeout: 30000,
+        });
+        console.log('PDF generado correctamente, tamaño:', pdf.length, 'bytes');
+        
+        fileBytes = pdf instanceof Uint8Array ? pdf : new Uint8Array(pdf as any);
+        contentType = 'application/pdf';
+      } catch (puppeteerError: any) {
+        console.error('Error con Puppeteer:', puppeteerError);
+        console.error('Error message:', puppeteerError.message);
+        console.error('Error stack:', puppeteerError.stack);
+        
+        // Cerrar página y navegador de forma segura
+        if (page) {
+          try {
+            await page.close();
+          } catch (closeError) {
+            console.error('Error cerrando página:', closeError);
+          }
+        }
+        if (browser) {
+          try {
+            await browser.close();
+          } catch (closeError) {
+            console.error('Error cerrando navegador:', closeError);
+          }
+        }
+        
+        // Mensajes de error más específicos
+        const errorMessage = puppeteerError.message || String(puppeteerError);
+        if (errorMessage.includes('Timeout') || errorMessage.includes('WS endpoint') || errorMessage.includes('socket hang up') || errorMessage.includes('ECONNRESET')) {
+          throw new Error(
+            'Error al generar PDF: Puppeteer no pudo comunicarse con el navegador. ' +
+            'Esto puede deberse a: 1) Chromium no está correctamente instalado, 2) Permisos insuficientes en Mac, ' +
+            '3) El navegador se cerró inesperadamente. ' +
+            'Solución: Ejecuta "cd backend && npm install puppeteer --force" para reinstalar Chromium.'
+          );
+        }
+        throw puppeteerError;
+      } finally {
+        // Asegurar cierre en cualquier caso
+        if (page) {
+          try {
+            await page.close();
+          } catch (e) {
+            console.error('Error en finally al cerrar página:', e);
+          }
+        }
+        if (browser) {
+          try {
+            await browser.close();
+            console.log('Navegador cerrado en finally');
+          } catch (e) {
+            console.error('Error en finally al cerrar navegador:', e);
+          }
+        }
+      }
     } else {
       const { generateExcelReport } = await import('@/lib/reports/excel-generator');
       const excelBuffer = await generateExcelReport(reportData, params.start_date, params.end_date);

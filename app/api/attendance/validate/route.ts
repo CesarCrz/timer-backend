@@ -138,13 +138,25 @@ export async function POST(request: Request) {
         return withCors(origin, Response.json({ valid: false, message: 'Ya tienes un check-in activo. Marca salida primero.' }));
       }
 
-      // Obtener hora actual en UTC (el servidor siempre trabaja en UTC)
-      // Luego convertir al timezone de la sucursal solo para cálculos y display
+      // Obtener hora actual y convertir al timezone de la sucursal
       const branchTimezone = closest.branch.timezone || 'America/Mexico_City';
-      // Usar formato SQL sin timezone para evitar problemas de interpretación en PostgreSQL
-      // PostgreSQL 'timestamp without time zone' espera un string sin 'Z' o información de timezone
-      const nowUTC = dayjs().utc().format('YYYY-MM-DD HH:mm:ss'); // Formato SQL estándar
-      const nowInBranchTZ = dayjs().utc().tz(branchTimezone); // Para cálculos de is_late
+      
+      // Obtener hora actual en el timezone de la sucursal
+      const nowInBranchTZ = dayjs().tz(branchTimezone);
+      
+      // Guardar la hora LOCAL de la sucursal con su timezone
+      // PostgreSQL TIMESTAMPTZ necesita formato ISO con 'T': 'YYYY-MM-DDTHH:mm:ss+HH:mm'
+      // Ejemplo: '2025-11-12T11:20:01-06:00'
+      // PostgreSQL convertirá a UTC internamente pero preservará el timezone original
+      const timeToSave = nowInBranchTZ.format('YYYY-MM-DDTHH:mm:ss') + nowInBranchTZ.format('Z');
+      
+      // LOGS PARA DEBUGGING
+      console.log('=== CHECK-IN DEBUG ===');
+      console.log('Hora actual (servidor):', dayjs().format('YYYY-MM-DD HH:mm:ss Z'));
+      console.log('Timezone de sucursal:', branchTimezone);
+      console.log('Hora en timezone de sucursal:', nowInBranchTZ.format('YYYY-MM-DD HH:mm:ss Z'));
+      console.log('Hora que se guardará (con timezone local):', timeToSave);
+      console.log('========================');
       
       // Calcular is_late según tolerancia
       let isLate = false;
@@ -169,7 +181,7 @@ export async function POST(request: Request) {
         .insert({
           employee_id: employee.id,
           branch_id: closest.branch.id,
-          check_in_time: nowUTC,
+          check_in_time: timeToSave,
           check_in_latitude: latitude,
           check_in_longitude: longitude,
           is_late: isLate,
@@ -178,10 +190,20 @@ export async function POST(request: Request) {
         .select()
         .single();
 
+      // LOGS POST-INSERT
+      console.log('=== POST-INSERT CHECK-IN ===');
+      console.log('Registro insertado:', record);
+      console.log('check_in_time desde BD (raw):', record.check_in_time);
+      console.log('check_in_time desde BD (tipo):', typeof record.check_in_time);
+      console.log('check_in_time parseado (UTC):', dayjs(record.check_in_time).utc().format('YYYY-MM-DD HH:mm:ss Z'));
+      console.log('check_in_time en timezone de sucursal:', dayjs(record.check_in_time).tz(branchTimezone).format('YYYY-MM-DD HH:mm:ss Z'));
+      console.log('VERIFICACIÓN: La hora debería ser:', nowInBranchTZ.format('YYYY-MM-DD HH:mm:ss Z'));
+      console.log('¿Coinciden?:', dayjs(record.check_in_time).tz(branchTimezone).format('YYYY-MM-DD HH:mm:ss') === nowInBranchTZ.format('YYYY-MM-DD HH:mm:ss'));
+      console.log('================================');
+
       // Formatear hora usando timezone de la sucursal
-      // El check_in_time viene de la BD como string sin timezone, lo interpretamos como UTC
-      // y luego convertimos al timezone de la sucursal
-      const checkInTime = dayjs.utc(record.check_in_time).tz(branchTimezone);
+      // Con TIMESTAMPTZ, PostgreSQL devuelve el timestamp en UTC, pero podemos convertirlo al timezone de la sucursal
+      const checkInTime = dayjs(record.check_in_time).tz(branchTimezone);
       const formattedTime = checkInTime.format('hh:mm A');
 
       return withCors(origin, Response.json({
@@ -213,18 +235,30 @@ export async function POST(request: Request) {
         }));
       }
 
-      // Obtener hora actual en UTC (el servidor siempre trabaja en UTC)
-      // Luego convertir al timezone de la sucursal solo para cálculos y display
+      // Obtener hora actual y convertir al timezone de la sucursal
       const branchTimezone = closest.branch.timezone || 'America/Mexico_City';
-      // Usar formato SQL sin timezone para evitar problemas de interpretación en PostgreSQL
-      // PostgreSQL 'timestamp without time zone' espera un string sin 'Z' o información de timezone
-      const nowUTC = dayjs().utc().format('YYYY-MM-DD HH:mm:ss'); // Formato SQL estándar
-      const nowInBranchTZ = dayjs().utc().tz(branchTimezone); // Para formateo de mensaje
+      
+      // Obtener hora actual en el timezone de la sucursal
+      const nowInBranchTZ = dayjs().tz(branchTimezone);
+      
+      // Guardar la hora LOCAL de la sucursal con su timezone
+      // PostgreSQL TIMESTAMPTZ necesita formato ISO con 'T': 'YYYY-MM-DDTHH:mm:ss+HH:mm'
+      // Ejemplo: '2025-11-12T11:20:01-06:00'
+      // PostgreSQL convertirá a UTC internamente pero preservará el timezone original
+      const timeToSave = nowInBranchTZ.format('YYYY-MM-DDTHH:mm:ss') + nowInBranchTZ.format('Z');
+      
+      // LOGS PARA DEBUGGING
+      console.log('=== CHECK-OUT DEBUG ===');
+      console.log('Hora actual (servidor):', dayjs().format('YYYY-MM-DD HH:mm:ss Z'));
+      console.log('Timezone de sucursal:', branchTimezone);
+      console.log('Hora en timezone de sucursal:', nowInBranchTZ.format('YYYY-MM-DD HH:mm:ss Z'));
+      console.log('Hora que se guardará (con timezone local):', timeToSave);
+      console.log('======================');
       
       const { data: updated } = await supabase
         .from('attendance_records')
         .update({
-          check_out_time: nowUTC,
+          check_out_time: timeToSave,
           check_out_latitude: latitude,
           check_out_longitude: longitude,
           status: 'completed',
@@ -233,10 +267,23 @@ export async function POST(request: Request) {
         .select()
         .single();
 
+      // LOGS POST-UPDATE
+      console.log('=== POST-UPDATE CHECK-OUT ===');
+      console.log('Registro actualizado:', updated);
+      console.log('check_in_time desde BD (raw):', updated.check_in_time);
+      console.log('check_out_time desde BD (raw):', updated.check_out_time);
+      console.log('check_in_time parseado (UTC):', dayjs(updated.check_in_time).utc().format('YYYY-MM-DD HH:mm:ss Z'));
+      console.log('check_out_time parseado (UTC):', dayjs(updated.check_out_time).utc().format('YYYY-MM-DD HH:mm:ss Z'));
+      console.log('check_in_time en timezone de sucursal:', dayjs(updated.check_in_time).tz(branchTimezone).format('YYYY-MM-DD HH:mm:ss Z'));
+      console.log('check_out_time en timezone de sucursal:', dayjs(updated.check_out_time).tz(branchTimezone).format('YYYY-MM-DD HH:mm:ss Z'));
+      console.log('VERIFICACIÓN: La hora de check-out debería ser:', nowInBranchTZ.format('YYYY-MM-DD HH:mm:ss Z'));
+      console.log('¿Coinciden?:', dayjs(updated.check_out_time).tz(branchTimezone).format('YYYY-MM-DD HH:mm:ss') === nowInBranchTZ.format('YYYY-MM-DD HH:mm:ss'));
+      console.log('===================================');
+
       // Calcular horas trabajadas
-      // Los timestamps vienen de la BD sin timezone, los interpretamos como UTC
-      const checkInUTC = dayjs.utc(updated.check_in_time);
-      const checkOutUTC = dayjs.utc(updated.check_out_time);
+      // Con TIMESTAMPTZ, los timestamps vienen en UTC desde PostgreSQL
+      const checkInUTC = dayjs(updated.check_in_time);
+      const checkOutUTC = dayjs(updated.check_out_time);
       const hoursWorked = checkOutUTC.diff(checkInUTC, 'hour', true);
       const totalMinutes = Math.floor(hoursWorked * 60);
       const hours = Math.floor(totalMinutes / 60);
@@ -244,9 +291,8 @@ export async function POST(request: Request) {
       const timeWorkedFormatted = `${hours}h ${minutes}m`;
 
       // Formatear hora usando timezone de la sucursal
-      // El check_out_time viene de la BD como string sin timezone, lo interpretamos como UTC
-      // y luego convertimos al timezone de la sucursal
-      const checkOutTime = dayjs.utc(updated.check_out_time).tz(branchTimezone);
+      // Con TIMESTAMPTZ, PostgreSQL devuelve el timestamp en UTC, pero podemos convertirlo al timezone de la sucursal
+      const checkOutTime = dayjs(updated.check_out_time).tz(branchTimezone);
       const formattedTime = checkOutTime.format('hh:mm A');
 
       return withCors(origin, Response.json({
@@ -266,10 +312,3 @@ export async function POST(request: Request) {
     return handleApiError(error);
   }
 }
-
-
-
-
-
-
-
