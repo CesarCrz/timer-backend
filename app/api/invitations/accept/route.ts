@@ -76,6 +76,10 @@ export async function POST(request: Request) {
       .eq('id', invitation.employee_id)
       .single();
 
+    if (!employee) {
+      throw new ValidationError('Employee not found');
+    }
+
     // Obtener branch_ids de la invitación (guardados como JSONB)
     const branchIds = invitation.branch_ids || [];
     
