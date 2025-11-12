@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Suscripción Confirmada - Timer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background-color: #f9fafb;
+            color: #374151;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+        }
+        .header {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            padding: 40px 24px;
+            text-align: center;
+            color: white;
+        }
+        .success-icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+        }
+        .logo {
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+        .content {
+            padding: 40px 32px;
+        }
+        .heading {
+            font-size: 22px;
+            font-weight: 700;
+            color: #1f2937;
+            margin-bottom: 8px;
+        }
+        .subheading {
+            font-size: 16px;
+            color: #4b5563;
+            margin-bottom: 32px;
+        }
+        .plan-card {
+            background-color: #ecfdf5;
+            border: 2px solid #10b981;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 32px;
+        }
+        .plan-name {
+            font-size: 18px;
+            font-weight: 600;
+            color: #047857;
+            margin-bottom: 12px;
+        }
+        .plan-details {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #d1fae5;
+        }
+        .detail-label {
+            font-size: 14px;
+            color: #4b5563;
+        }
+        .detail-value {
+            font-size: 14px;
+            font-weight: 600;
+            color: #047857;
+        }
+        .plan-features {
+            font-size: 13px;
+            color: #4b5563;
+            line-height: 1.8;
+        }
+        .plan-features li {
+            margin-left: 20px;
+            margin-bottom: 6px;
+        }
+        .cta-button {
+            background-color: #3b82f6;
+            color: white;
+            padding: 14px 32px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            display: inline-block;
+            width: 100%;
+            text-align: center;
+            margin-bottom: 16px;
+            transition: background-color 0.3s;
+            border: none;
+        }
+        .cta-button:hover {
+            background-color: #2563eb;
+        }
+        .secondary-button {
+            background-color: transparent;
+            color: #3b82f6;
+            padding: 12px 24px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            display: inline-block;
+            width: 100%;
+            text-align: center;
+            border: 2px solid #3b82f6;
+            transition: all 0.3s;
+        }
+        .secondary-button:hover {
+            background-color: #eff6ff;
+        }
+        .info-section {
+            background-color: #eff6ff;
+            border-left: 4px solid #3b82f6;
+            padding: 16px;
+            margin-bottom: 24px;
+            border-radius: 4px;
+        }
+        .info-section-title {
+            font-weight: 600;
+            color: #1e3a8a;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        .info-section-text {
+            font-size: 14px;
+            color: #1e3a8a;
+        }
+        .divider {
+            border: none;
+            border-top: 1px solid #e5e7eb;
+            margin: 32px 0;
+        }
+        .footer {
+            background-color: #f9fafb;
+            padding: 24px 32px;
+            text-align: center;
+            border-top: 1px solid #e5e7eb;
+        }
+        .footer-text {
+            font-size: 13px;
+            color: #6b7280;
+            margin-bottom: 12px;
+        }
+        .support-text {
+            font-size: 13px;
+            color: #6b7280;
+            margin-top: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="success-icon">✓</div>
+            <div class="logo">⏱ Timer</div>
+        </div>
+
+        <!-- Content -->
+        <div class="content">
+            <div class="heading">¡Suscripción Confirmada!</div>
+            <div class="subheading">Tu plan está activo y listo para usar</div>
+
+            <!-- Plan Card -->
+            <div class="plan-card">
+                <div class="plan-name">Plan {{PLAN_NAME}}</div>
+                <div class="plan-details">
+                    <div>
+                        <div class="detail-label">Precio Mensual</div>
+                        <div class="detail-value">${{PRICE_MXN}} MXN</div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div class="detail-label">Próxima Renovación</div>
+                        <div class="detail-value">{{RENEWAL_DATE}}</div>
+                    </div>
+                </div>
+                <div class="plan-details">
+                    <div>
+                        <div class="detail-label">Empleados Incluidos</div>
+                        <div class="detail-value">{{MAX_EMPLOYEES}}</div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div class="detail-label">Sucursales Incluidas</div>
+                        <div class="detail-value">{{MAX_BRANCHES}}</div>
+                    </div>
+                </div>
+                <div class="plan-features">
+                    <strong style="display: block; margin-bottom: 8px; color: #047857;">Características Incluidas:</strong>
+                    <ul>
+                        {{FEATURES_LIST}}
+                    </ul>
+                </div>
+            </div>
+
+            <!-- CTA Buttons -->
+            <a href="{{DASHBOARD_URL}}" class="cta-button">Ir a Mi Dashboard</a>
+            <a href="{{SETTINGS_URL}}" class="secondary-button">Ver Configuración de Suscripción</a>
+
+            <!-- Info Sections -->
+            <div class="info-section">
+                <div class="info-section-title">💳 Información de Facturación</div>
+                <div class="info-section-text">
+                    Se cobrará automáticamente el {{NEXT_BILLING_DATE}} a tu método de pago registrado. Puedes cambiar tu plan o cancelar en cualquier momento desde tu configuración de suscripción.
+                </div>
+            </div>
+
+            <div class="info-section">
+                <div class="info-section-title">📱 Primeros Pasos</div>
+                <div class="info-section-text">
+                    1. Accede a tu dashboard<br>
+                    2. Crea tus sucursales<br>
+                    3. Agrega empleados vía WhatsApp<br>
+                    4. ¡Comienza a registrar asistencias!
+                </div>
+            </div>
+        </div>
+
+        <!-- Divider -->
+        <hr class="divider">
+
+        <!-- Footer -->
+        <div class="footer">
+            <div class="footer-text">
+                © 2025 Timer. Todos los derechos reservados.
+            </div>
+            <div class="footer-text">
+                <a href="#" style="color: #3b82f6; text-decoration: none;">Términos de Servicio</a> | 
+                <a href="#" style="color: #3b82f6; text-decoration: none;">Política de Privacidad</a>
+            </div>
+            <div class="support-text">
+                ¿Preguntas? Contacta a <a href="mailto:soporte@timer.com" style="color: #3b82f6; text-decoration: none;">soporte@timer.com</a><br>
+                Disponibles de lunes a viernes, 8:00 AM - 6:00 PM CST
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+

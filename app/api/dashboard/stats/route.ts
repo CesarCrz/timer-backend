@@ -51,40 +51,14 @@ export async function GET(request: Request) {
       .eq('business_id', businessId)
       .eq('status', 'active');
 
-    // Llegadas tarde hoy - calcular basándose en business_hours_start
-    let lateArrivalsCount = 0;
-    if (employeeIds.length > 0) {
-      const { data: todayRecords } = await supabase
-        .from('attendance_records')
-        .select(`
-          id,
-          check_in_time,
-          branch:branches(business_hours_start, timezone)
-        `)
-        .gte('check_in_time', today.toISOString())
-        .lte('check_in_time', todayEnd.toISOString())
-        .in('employee_id', employeeIds);
-      
-      if (todayRecords) {
-        for (const record of todayRecords) {
-          if (!record.branch || !record.branch.business_hours_start) continue;
-          
-          const branchTimezone = record.branch.timezone || 'America/Mexico_City';
-          const checkInTime = dayjs(record.check_in_time).tz(branchTimezone);
-          const [startHour, startMinute] = record.branch.business_hours_start.split(':');
-          const scheduledStart = checkInTime
-            .clone()
-            .hour(parseInt(startHour))
-            .minute(parseInt(startMinute))
-            .second(0)
-            .millisecond(0);
-          
-          if (checkInTime.isAfter(scheduledStart)) {
-            lateArrivalsCount++;
-          }
-        }
-      }
-    }
+    // Llegadas tarde hoy - usar campo is_late de attendance_records
+    const { count: lateArrivalsCount } = employeeIds.length > 0 ? await supabase
+      .from('attendance_records')
+      .select('id', { count: 'exact' })
+      .eq('is_late', true)
+      .gte('check_in_time', today.toISOString())
+      .lte('check_in_time', todayEnd.toISOString())
+      .in('employee_id', employeeIds) : { count: 0 };
 
     // Empleados activos ahora (check-ins sin check-out)
     const { data: activeNow } = employeeIds.length > 0 ? await supabase
@@ -114,12 +88,7 @@ export async function GET(request: Request) {
 
       const { data: dayRecords } = await supabase
         .from('attendance_records')
-        .select(`
-          id,
-          check_in_time,
-          status,
-          branch:branches(business_hours_start, timezone)
-        `)
+        .select('id, is_late')
         .gte('check_in_time', dayStart.toISOString())
         .lte('check_in_time', dayEnd.toISOString())
         .in('employee_id', employeeIds.length > 0 ? employeeIds : ['00000000-0000-0000-0000-000000000000']); // Si no hay empleados, usar UUID inválido para que no retorne nada
@@ -129,19 +98,7 @@ export async function GET(request: Request) {
       
       if (dayRecords) {
         for (const record of dayRecords) {
-          if (!record.branch || !record.branch.business_hours_start) continue;
-          
-          const branchTimezone = record.branch.timezone || 'America/Mexico_City';
-          const checkInTime = dayjs(record.check_in_time).tz(branchTimezone);
-          const [startHour, startMinute] = record.branch.business_hours_start.split(':');
-          const scheduledStart = checkInTime
-            .clone()
-            .hour(parseInt(startHour))
-            .minute(parseInt(startMinute))
-            .second(0)
-            .millisecond(0);
-          
-          if (checkInTime.isAfter(scheduledStart)) {
+          if (record.is_late === true) {
             late++;
           } else {
             onTime++;
@@ -168,6 +125,16 @@ export async function GET(request: Request) {
       },
       weekly_chart: weeklyChart,
       active_now: (activeNow || []).map((record: any) => {
+        if (!record.check_in_time) {
+          return {
+            id: record.id,
+            name: record.employee?.full_name || 'Empleado',
+            branch: record.branch?.name || 'Sucursal',
+            check_in_time: '-',
+            duration: '-',
+          };
+        }
+        
         const branchTimezone = record.branch?.timezone || 'America/Mexico_City';
         const checkInTime = dayjs.utc(record.check_in_time).tz(branchTimezone);
         const now = dayjs().tz(branchTimezone);
@@ -180,7 +147,7 @@ export async function GET(request: Request) {
           id: record.id,
           name: record.employee?.full_name || 'Empleado',
           branch: record.branch?.name || 'Sucursal',
-          check_in_time: checkInTime.format('hh:mm A'),
+          check_in_time: checkInTime.isValid() ? checkInTime.format('hh:mm A') : '-',
           duration: durationFormatted,
         };
       }),

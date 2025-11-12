@@ -101,7 +101,7 @@ export async function POST(request: Request) {
 
     const { data: branches } = await supabase
       .from('branches')
-      .select('id, name, latitude, longitude, tolerance_radius_meters, timezone')
+      .select('id, name, latitude, longitude, tolerance_radius_meters, timezone, business_hours_start, tolerance_minutes')
       .in('id', activeBranchIds)
       .eq('status', 'active');
 
@@ -138,24 +138,49 @@ export async function POST(request: Request) {
         return withCors(origin, Response.json({ valid: false, message: 'Ya tienes un check-in activo. Marca salida primero.' }));
       }
 
-      const now = new Date().toISOString();
+      // Obtener hora actual en UTC (el servidor siempre trabaja en UTC)
+      // Luego convertir al timezone de la sucursal solo para cálculos y display
+      const branchTimezone = closest.branch.timezone || 'America/Mexico_City';
+      // Usar formato SQL sin timezone para evitar problemas de interpretación en PostgreSQL
+      // PostgreSQL 'timestamp without time zone' espera un string sin 'Z' o información de timezone
+      const nowUTC = dayjs().utc().format('YYYY-MM-DD HH:mm:ss'); // Formato SQL estándar
+      const nowInBranchTZ = dayjs().utc().tz(branchTimezone); // Para cálculos de is_late
+      
+      // Calcular is_late según tolerancia
+      let isLate = false;
+      if (closest.branch.business_hours_start && closest.branch.tolerance_minutes !== null) {
+        const [startHour, startMinute] = closest.branch.business_hours_start.split(':');
+        const scheduledStart = nowInBranchTZ
+          .clone()
+          .hour(parseInt(startHour))
+          .minute(parseInt(startMinute))
+          .second(0)
+          .millisecond(0);
+        
+        const toleranceMinutes = closest.branch.tolerance_minutes || 0;
+        const allowedStart = scheduledStart.add(toleranceMinutes, 'minute');
+        
+        // Si el check-in es después de la hora permitida (apertura + tolerancia), es tarde
+        isLate = nowInBranchTZ.isAfter(allowedStart);
+      }
+      
       const { data: record } = await supabase
         .from('attendance_records')
         .insert({
           employee_id: employee.id,
           branch_id: closest.branch.id,
-          check_in_time: now,
+          check_in_time: nowUTC,
           check_in_latitude: latitude,
           check_in_longitude: longitude,
+          is_late: isLate,
           status: 'active',
         })
         .select()
         .single();
 
       // Formatear hora usando timezone de la sucursal
-      const branchTimezone = closest.branch.timezone || 'America/Mexico_City';
-      // Usar dayjs para manejar correctamente el timezone
-      // Asegurar que se interprete como UTC primero, luego convertir al timezone de la sucursal
+      // El check_in_time viene de la BD como string sin timezone, lo interpretamos como UTC
+      // y luego convertimos al timezone de la sucursal
       const checkInTime = dayjs.utc(record.check_in_time).tz(branchTimezone);
       const formattedTime = checkInTime.format('hh:mm A');
 
@@ -188,11 +213,18 @@ export async function POST(request: Request) {
         }));
       }
 
-      const now = new Date().toISOString();
+      // Obtener hora actual en UTC (el servidor siempre trabaja en UTC)
+      // Luego convertir al timezone de la sucursal solo para cálculos y display
+      const branchTimezone = closest.branch.timezone || 'America/Mexico_City';
+      // Usar formato SQL sin timezone para evitar problemas de interpretación en PostgreSQL
+      // PostgreSQL 'timestamp without time zone' espera un string sin 'Z' o información de timezone
+      const nowUTC = dayjs().utc().format('YYYY-MM-DD HH:mm:ss'); // Formato SQL estándar
+      const nowInBranchTZ = dayjs().utc().tz(branchTimezone); // Para formateo de mensaje
+      
       const { data: updated } = await supabase
         .from('attendance_records')
         .update({
-          check_out_time: now,
+          check_out_time: nowUTC,
           check_out_latitude: latitude,
           check_out_longitude: longitude,
           status: 'completed',
@@ -202,16 +234,18 @@ export async function POST(request: Request) {
         .single();
 
       // Calcular horas trabajadas
-      const hoursWorked = (new Date(updated.check_out_time).getTime() - new Date(updated.check_in_time).getTime()) / (1000 * 60 * 60);
+      // Los timestamps vienen de la BD sin timezone, los interpretamos como UTC
+      const checkInUTC = dayjs.utc(updated.check_in_time);
+      const checkOutUTC = dayjs.utc(updated.check_out_time);
+      const hoursWorked = checkOutUTC.diff(checkInUTC, 'hour', true);
       const totalMinutes = Math.floor(hoursWorked * 60);
       const hours = Math.floor(totalMinutes / 60);
       const minutes = totalMinutes % 60;
       const timeWorkedFormatted = `${hours}h ${minutes}m`;
 
       // Formatear hora usando timezone de la sucursal
-      const branchTimezone = closest.branch.timezone || 'America/Mexico_City';
-      // Usar dayjs para manejar correctamente el timezone
-      // Asegurar que se interprete como UTC primero, luego convertir al timezone de la sucursal
+      // El check_out_time viene de la BD como string sin timezone, lo interpretamos como UTC
+      // y luego convertimos al timezone de la sucursal
       const checkOutTime = dayjs.utc(updated.check_out_time).tz(branchTimezone);
       const formattedTime = checkOutTime.format('hh:mm A');
 

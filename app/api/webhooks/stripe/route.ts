@@ -1,6 +1,14 @@
 import { NextRequest } from 'next/server';
 import { stripe } from '@/lib/stripe/client';
 import { createServiceRoleClient } from '@/lib/utils/auth';
+import { sendEmail } from '@/lib/emails/client';
+import { renderTemplate } from '@/lib/emails/templates';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 export async function POST(request: NextRequest) {
   const body = await request.text();
@@ -21,6 +29,19 @@ export async function POST(request: NextRequest) {
       case 'checkout.session.completed': {
         const session = event.data.object;
         const subscription = await stripe.subscriptions.retrieve(session.subscription as string);
+        
+        // Obtener información del tier y business
+        const { data: tier } = await supabase
+          .from('subscription_tiers')
+          .select('*')
+          .eq('id', session.metadata?.tier_id)
+          .single();
+        
+        const { data: business } = await supabase
+          .from('businesses')
+          .select('*, owner:auth.users(email)')
+          .eq('id', session.metadata?.business_id)
+          .single();
         
         // Verificar si ya existe suscripción para este negocio
         const { data: existing } = await supabase
@@ -55,6 +76,36 @@ export async function POST(request: NextRequest) {
             current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
             current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
           });
+        }
+        
+        // Enviar correo de confirmación
+        if (business && tier && business.owner?.email) {
+          try {
+            const renewalDate = dayjs(subscription.current_period_end * 1000).format('DD/MM/YYYY');
+            const nextBillingDate = dayjs(subscription.current_period_end * 1000).format('DD/MM/YYYY');
+            const features = tier.features && Array.isArray(tier.features) ? tier.features : [];
+            
+            const { subject, html } = renderTemplate('subscription-confirmed', {
+              planName: tier.name,
+              priceMxn: parseFloat(tier.price_monthly_mxn).toFixed(2),
+              renewalDate,
+              maxEmployees: tier.max_employees,
+              maxBranches: tier.max_branches,
+              features,
+              nextBillingDate,
+              dashboardUrl: `${process.env.FRONTEND_URL || 'https://timer.app'}/dashboard`,
+              settingsUrl: `${process.env.FRONTEND_URL || 'https://timer.app'}/subscription`,
+            });
+            
+            await sendEmail({
+              to: business.owner.email,
+              subject,
+              html,
+            });
+          } catch (emailError: any) {
+            console.error('Error enviando correo de suscripción confirmada:', emailError);
+            // No fallar el webhook si falla el correo
+          }
         }
         break;
       }

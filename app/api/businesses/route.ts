@@ -32,17 +32,35 @@ export async function GET(request: Request) {
     // Si no existe, crear uno con el nombre del metadata o email
     if (!business) {
       const businessName = user.user_metadata?.company || user.user_metadata?.full_name || user.email?.split('@')[0] || 'Mi Negocio';
-      const { data: newBusiness } = await supabase
+      const now = new Date().toISOString();
+      const ownerName = user.user_metadata?.full_name || user.email || null;
+      
+      // Preparar datos de inserción
+      const insertData: any = {
+        owner_id: user.id,
+        name: businessName,
+        email: user.email?.toLowerCase() || null,
+        timezone: user.user_metadata?.timezone || 'America/Mexico_City',
+        currency: 'MXN',
+        terms_accepted_at: now,
+        privacy_accepted_at: now,
+      };
+      
+      // Solo agregar owner_name si lo tenemos, si no el trigger lo intentará
+      if (ownerName) {
+        insertData.owner_name = ownerName;
+      }
+      
+      const { data: newBusiness, error: insertError } = await supabase
         .from('businesses')
-        .insert({
-          owner_id: user.id,
-          name: businessName,
-          email: user.email?.toLowerCase() || null,
-          timezone: user.user_metadata?.timezone || 'America/Mexico_City',
-          currency: 'MXN',
-        })
+        .insert(insertData)
         .select()
         .single();
+
+      if (insertError) {
+        console.error('Error creating business:', insertError);
+        throw new Error(`Failed to create business: ${insertError.message}`);
+      }
 
       business = newBusiness;
     }
@@ -96,18 +114,36 @@ export async function POST(request: Request) {
       return withCors(origin, Response.json(updated));
     }
 
-    // Crear nuevo business
-    const { data: newBusiness } = await supabase
+    // Crear nuevo business con términos aceptados
+    const now = new Date().toISOString();
+    const ownerName = user.user_metadata?.full_name || user.email || null;
+    
+    // Preparar datos de inserción
+    const insertData: any = {
+      owner_id: user.id,
+      name: payload.name,
+      email: payload.email?.toLowerCase() || user.email?.toLowerCase() || null,
+      timezone: payload.timezone,
+      currency: payload.currency,
+      terms_accepted_at: now,
+      privacy_accepted_at: now,
+    };
+    
+    // Solo agregar owner_name si lo tenemos, si no el trigger lo intentará
+    if (ownerName) {
+      insertData.owner_name = ownerName;
+    }
+    
+    const { data: newBusiness, error: insertError } = await supabase
       .from('businesses')
-      .insert({
-        owner_id: user.id,
-        name: payload.name,
-        email: payload.email?.toLowerCase() || user.email?.toLowerCase() || null,
-        timezone: payload.timezone,
-        currency: payload.currency,
-      })
+      .insert(insertData)
       .select()
       .single();
+
+    if (insertError) {
+      console.error('Error creating business:', insertError);
+      throw new Error(`Failed to create business: ${insertError.message}`);
+    }
 
     return withCors(origin, Response.json(newBusiness));
   } catch (error) {

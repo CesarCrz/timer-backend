@@ -21,14 +21,25 @@ export async function sendEmailWithAttachment(params: {
   
   // Configurar transporter de Nodemailer
   // Si hay variables de entorno de SMTP, usarlas; si no, usar Gmail
+  const smtpPort = parseInt(process.env.SMTP_PORT || '587');
+  const smtpSecure = process.env.SMTP_SECURE === 'true' || smtpPort === 465;
+  
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT || '587'),
-    secure: process.env.SMTP_SECURE === 'true', // true para 465, false para otros puertos
+    port: smtpPort,
+    secure: smtpSecure, // true para 465, false para otros puertos
     auth: {
       user: process.env.SMTP_USER || process.env.GMAIL_USER,
       pass: process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD,
     },
+    tls: {
+      // No rechazar certificados no autorizados (útil para desarrollo)
+      rejectUnauthorized: false,
+    },
+    connectionTimeout: 10000, // 10 segundos
+    greetingTimeout: 10000, // 10 segundos
+    socketTimeout: 10000, // 10 segundos
+    debug: process.env.NODE_ENV === 'development', // Activar debug en desarrollo
   });
 
   try {

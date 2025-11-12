@@ -9,6 +9,7 @@ const updateSchema = z.object({
   latitude: z.number().min(-90).max(90).optional(),
   longitude: z.number().min(-180).max(180).optional(),
   tolerance_radius_meters: z.number().min(10).max(200).optional(),
+  tolerance_minutes: z.number().min(0).max(59).optional(),
   timezone: z.string().optional(),
   business_hours_start: z.string().regex(/^\d{2}:\d{2}:\d{2}$/).optional(),
   business_hours_end: z.string().regex(/^\d{2}:\d{2}:\d{2}$/).optional(),

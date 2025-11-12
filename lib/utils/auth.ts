@@ -50,19 +50,56 @@ export async function getUserBusinessId(userId: string) {
   
   // Si no existe, crear uno por defecto
   if (!business) {
-    const { data: newBusiness } = await supabase
+    const now = new Date().toISOString();
+    
+    // Obtener información del usuario para owner_name
+    // Usar el admin API de Supabase para obtener datos del usuario
+    let ownerName: string | null = null;
+    try {
+      // El Service Role Client tiene acceso al admin API
+      const { data: userData, error: userError } = await supabase.auth.admin.getUserById(userId);
+      
+      if (!userError && userData?.user) {
+        ownerName = userData.user.user_metadata?.full_name 
+          || userData.user.raw_user_meta_data?.full_name 
+          || userData.user.email 
+          || null;
+      }
+    } catch (err) {
+      // Si falla obtener el nombre, continuar sin él (el trigger lo intentará)
+      // No es crítico, el business se creará de todas formas
+      console.warn('Could not fetch user data for owner_name, trigger will handle it:', err);
+    }
+    
+    // Preparar datos de inserción
+    const insertData: any = {
+      owner_id: userId,
+      name: 'Mi Negocio',
+      timezone: 'America/Mexico_City',
+      currency: 'MXN',
+      terms_accepted_at: now,
+      privacy_accepted_at: now,
+    };
+    
+    // Solo agregar owner_name si lo obtuvimos exitosamente
+    // Si es null, el trigger lo intentará establecer
+    if (ownerName) {
+      insertData.owner_name = ownerName;
+    }
+    
+    const { data: newBusiness, error: insertError } = await supabase
       .from('businesses')
-      .insert({
-        owner_id: userId,
-        name: 'Mi Negocio',
-        timezone: 'America/Mexico_City',
-        currency: 'MXN',
-      })
+      .insert(insertData)
       .select('id')
       .single();
     
+    if (insertError) {
+      console.error('Error creating business:', insertError);
+      throw new Error(`Failed to create business for user: ${insertError.message}`);
+    }
+    
     if (!newBusiness) {
-      throw new Error('Failed to create business for user');
+      throw new Error('Failed to create business for user: No data returned');
     }
     business = newBusiness;
   }

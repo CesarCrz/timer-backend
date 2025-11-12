@@ -8,10 +8,12 @@ dayjs.extend(timezone);
 export type AttendanceRecord = {
   check_in_time: string;
   check_out_time: string;
+  is_late?: boolean;
   branch: {
     name: string;
     business_hours_start: string;
     timezone: string;
+    tolerance_minutes?: number;
   };
   employee: {
     hourly_rate: number;
@@ -30,13 +32,19 @@ export type DailyCalculation = {
   overtime_payment: number;
   total_payment: number;
   branch_name: string;
+  branch_hours_start?: string;
+  branch_hours_end?: string;
+  branch_location?: string;
+  branch_timezone?: string;
   is_late: boolean;
 };
 
 export function calculateAttendanceMetrics(record: AttendanceRecord): DailyCalculation {
   const tz = record.branch.timezone;
-  const checkIn = dayjs(record.check_in_time).tz(tz);
-  const checkOut = dayjs(record.check_out_time).tz(tz);
+  // Los timestamps vienen de la BD sin timezone, los interpretamos como UTC
+  // y luego convertimos al timezone de la sucursal
+  const checkIn = dayjs.utc(record.check_in_time).tz(tz);
+  const checkOut = dayjs.utc(record.check_out_time).tz(tz);
 
   const [startHour, startMinute] = record.branch.business_hours_start.split(':');
   const scheduledStart = checkIn
@@ -47,7 +55,12 @@ export function calculateAttendanceMetrics(record: AttendanceRecord): DailyCalcu
 
   const totalMinutes = checkOut.diff(checkIn, 'minute');
   const hoursWorked = totalMinutes / 60;
-  const lateMinutes = Math.max(0, checkIn.diff(scheduledStart, 'minute'));
+  
+  // Calcular late_minutes considerando la tolerancia
+  const toleranceMinutes = record.branch.tolerance_minutes || 0;
+  const allowedStart = scheduledStart.add(toleranceMinutes, 'minute');
+  const lateMinutes = checkIn.isAfter(allowedStart) ? Math.max(0, checkIn.diff(allowedStart, 'minute')) : 0;
+  
   const overtimeHours = Math.max(0, hoursWorked - 8);
   const effectiveHours = Math.max(0, hoursWorked - lateMinutes / 60);
 
@@ -56,6 +69,9 @@ export function calculateAttendanceMetrics(record: AttendanceRecord): DailyCalcu
   const paymentWithLate = hourlyRate * effectiveHours;
   const overtimePayment = hourlyRate * overtimeHours;
   const totalPayment = paymentWithLate + overtimePayment;
+
+  // Usar is_late de la BD si está disponible, sino calcularlo según tolerancia
+  const isLate = record.is_late !== undefined ? record.is_late : checkIn.isAfter(allowedStart);
 
   return {
     date: checkIn.format('DD/MM/YYYY'),
@@ -69,7 +85,11 @@ export function calculateAttendanceMetrics(record: AttendanceRecord): DailyCalcu
     overtime_payment: parseFloat(overtimePayment.toFixed(2)),
     total_payment: parseFloat(totalPayment.toFixed(2)),
     branch_name: record.branch.name,
-    is_late: lateMinutes > 0,
+    branch_hours_start: (record.branch as any).business_hours_start,
+    branch_hours_end: (record.branch as any).business_hours_end,
+    branch_location: (record.branch as any).address,
+    branch_timezone: record.branch.timezone,
+    is_late: isLate,
   };
 }
 

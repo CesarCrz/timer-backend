@@ -10,6 +10,7 @@ const branchSchema = z.object({
   longitude: z.number().min(-180).max(180),
   address: z.string().optional(),
   tolerance_radius_meters: z.number().min(10).max(200).default(100),
+  tolerance_minutes: z.number().min(0).max(59).default(0),
   timezone: z.string().default('America/Mexico_City'),
   business_hours_start: z.string().regex(/^\d{2}:\d{2}:\d{2}$/).default('08:00:00'),
   business_hours_end: z.string().regex(/^\d{2}:\d{2}:\d{2}$/).default('23:00:00'),

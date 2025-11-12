@@ -23,14 +23,34 @@ export async function GET(request: NextRequest) {
       return Response.json({ success: true, closed: 0 });
     }
 
+    // Importar dayjs para manejo correcto de timezones
+    const dayjs = (await import('dayjs')).default;
+    const utc = (await import('dayjs/plugin/utc')).default;
+    const timezone = (await import('dayjs/plugin/timezone')).default;
+    dayjs.extend(utc);
+    dayjs.extend(timezone);
+
     await Promise.all(activeRecords.map((record: any) => {
-      const checkInDate = new Date(record.check_in_time);
+      // El check_in_time está guardado en UTC, necesitamos convertirlo al timezone de la sucursal
+      // para calcular la hora de cierre correctamente
+      const branchTimezone = record.branch?.timezone || 'America/Mexico_City';
+      const checkInDate = dayjs.utc(record.check_in_time).tz(branchTimezone);
       const [h, m] = record.branch.business_hours_end.split(':');
-      const auto = new Date(checkInDate);
-      auto.setHours(parseInt(h), parseInt(m), 0, 0);
+      
+      // Establecer la hora de cierre en el timezone de la sucursal
+      const autoCheckOutInBranchTZ = checkInDate
+        .hour(parseInt(h))
+        .minute(parseInt(m))
+        .second(0)
+        .millisecond(0);
+      
+      // Convertir a UTC y usar formato SQL sin timezone para evitar problemas de interpretación
+      // PostgreSQL 'timestamp without time zone' espera un string sin 'Z' o información de timezone
+      const autoCheckOutUTC = autoCheckOutInBranchTZ.utc().format('YYYY-MM-DD HH:mm:ss');
+      
       return supabase
         .from('attendance_records')
-        .update({ check_out_time: auto.toISOString(), status: 'completed', is_auto_closed: true })
+        .update({ check_out_time: autoCheckOutUTC, status: 'completed', is_auto_closed: true })
         .eq('id', record.id);
     }));
 

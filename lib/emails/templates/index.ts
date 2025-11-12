@@ -1,4 +1,4 @@
-type TemplateName = 'report-ready' | 'invitation' | 'payment-failed' | 'generic';
+type TemplateName = 'report-ready' | 'invitation' | 'payment-failed' | 'subscription-confirmed' | 'generic';
 
 type TemplateData = Record<string, any>;
 
@@ -35,20 +35,74 @@ function baseLayout(content: string, title = 'Timer') {
 }
 
 function reportReadyTemplate(data: { reportUrl: string; expiresAt?: string }) {
-  const expires = data.expiresAt ? `<p class="muted">Este enlace expira: ${new Date(data.expiresAt).toLocaleString('es-MX')}</p>` : '';
   const content = `
     <h2 style="margin:0 0 12px 0">Tu reporte está listo</h2>
-    <p style="margin:0 0 16px 0;color:#374151">Generamos tu reporte de asistencia. Puedes descargarlo con el siguiente botón:</p>
-    <p style="margin:0 0 16px 0">
-      <a class="btn" href="${data.reportUrl}" target="_blank" rel="noopener noreferrer">Descargar reporte</a>
+    <p style="margin:0 0 16px 0;color:#374151">Generamos tu reporte de asistencia. El documento se encuentra adjunto en este correo electrónico.</p>
+    <p style="margin:0 0 16px 0;color:#374151;padding:12px;background-color:#eff6ff;border-left:4px solid #2563eb;border-radius:4px;">
+      📎 <strong>Archivo adjunto:</strong> Puedes encontrar el reporte en formato PDF o Excel como archivo adjunto en este mismo correo.
     </p>
-    ${expires}
   `;
   return baseLayout(content, 'Reporte listo | Timer');
 }
 
 function genericTemplate(data: { title?: string; bodyHtml: string }) {
   return baseLayout(data.bodyHtml, data.title || 'Timer');
+}
+
+function subscriptionConfirmedTemplate(data: {
+  planName: string;
+  priceMxn: string;
+  renewalDate: string;
+  maxEmployees: number;
+  maxBranches: number;
+  features: string[];
+  nextBillingDate: string;
+  dashboardUrl: string;
+  settingsUrl: string;
+}) {
+  const fs = require('fs');
+  const path = require('path');
+  
+  try {
+    const templatePath = path.join(process.cwd(), 'lib/emails/templates/subscription-confirmed.html');
+    let html = fs.readFileSync(templatePath, 'utf-8');
+    
+    // Reemplazar variables
+    html = html.replace(/{{PLAN_NAME}}/g, data.planName);
+    html = html.replace(/{{PRICE_MXN}}/g, data.priceMxn);
+    html = html.replace(/{{RENEWAL_DATE}}/g, data.renewalDate);
+    html = html.replace(/{{MAX_EMPLOYEES}}/g, data.maxEmployees.toString());
+    html = html.replace(/{{MAX_BRANCHES}}/g, data.maxBranches.toString());
+    html = html.replace(/{{NEXT_BILLING_DATE}}/g, data.nextBillingDate);
+    html = html.replace(/{{DASHBOARD_URL}}/g, data.dashboardUrl);
+    html = html.replace(/{{SETTINGS_URL}}/g, data.settingsUrl);
+    
+    // Reemplazar lista de características
+    const featuresList = data.features.map(f => `<li>${f}</li>`).join('\n                        ');
+    html = html.replace(/{{FEATURES_LIST}}/g, featuresList);
+    
+    return html;
+  } catch (error) {
+    // Fallback a template simple si no se puede leer el archivo
+    const featuresList = data.features.map(f => `<li>${f}</li>`).join('');
+    return baseLayout(`
+      <h2 style="margin:0 0 12px 0">¡Suscripción Confirmada!</h2>
+      <p style="margin:0 0 16px 0;color:#374151">Tu plan <strong>${data.planName}</strong> está activo y listo para usar.</p>
+      <p style="margin:0 0 16px 0;color:#374151">
+        <strong>Precio:</strong> $${data.priceMxn} MXN/mes<br>
+        <strong>Próxima renovación:</strong> ${data.renewalDate}<br>
+        <strong>Empleados incluidos:</strong> ${data.maxEmployees}<br>
+        <strong>Sucursales incluidas:</strong> ${data.maxBranches}
+      </p>
+      <p style="margin:0 0 16px 0;color:#374151"><strong>Características:</strong></p>
+      <ul style="margin:0 0 16px 0;padding-left:20px;color:#374151">
+        ${featuresList}
+      </ul>
+      <p style="margin:0 0 16px 0">
+        <a class="btn" href="${data.dashboardUrl}" target="_blank" rel="noopener">Ir a Mi Dashboard</a>
+      </p>
+    `, 'Suscripción Confirmada | Timer');
+  }
 }
 
 export function renderTemplate(name: TemplateName, data: TemplateData): { subject: string; html: string } {
@@ -72,6 +126,20 @@ export function renderTemplate(name: TemplateName, data: TemplateData): { subjec
         <p style="margin:0 0 16px 0;color:#374151">Hubo un problema con tu último pago. Por favor actualiza tu método de pago para evitar interrupciones.</p>
       `;
       return { subject: 'Problema con tu pago', html: baseLayout(content, 'Pago no procesado | Timer') };
+    }
+    case 'subscription-confirmed': {
+      const html = subscriptionConfirmedTemplate({
+        planName: data.planName,
+        priceMxn: data.priceMxn,
+        renewalDate: data.renewalDate,
+        maxEmployees: data.maxEmployees,
+        maxBranches: data.maxBranches,
+        features: data.features || [],
+        nextBillingDate: data.nextBillingDate,
+        dashboardUrl: data.dashboardUrl || `${process.env.FRONTEND_URL || 'https://timer.app'}/dashboard`,
+        settingsUrl: data.settingsUrl || `${process.env.FRONTEND_URL || 'https://timer.app'}/subscription`,
+      });
+      return { subject: '¡Suscripción Confirmada!', html };
     }
     case 'generic':
     default: {
