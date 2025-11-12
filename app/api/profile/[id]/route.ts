@@ -12,7 +12,7 @@ export async function OPTIONS(request: Request) {
   return preflight(origin);
 }
 
-export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const origin = request.headers.get('origin');
     const user = await getCurrentUser(request);
@@ -22,7 +22,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
     // Verificar que el business pertenece al usuario
     const businessId = await getUserBusinessId(user.id);
-    if (params.id !== businessId) {
+    const { id } = await params;
+    if (id !== businessId) {
       return withCors(
         origin,
         Response.json({ error: 'No tienes permiso para actualizar este negocio' }, { status: 403 })
