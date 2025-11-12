@@ -115,7 +115,7 @@ export async function sendEmployeeInvitation(params: {
   branches: string[]; // Nombres de sucursales
   invitationUrl: string; // URL del link de invitación
   templateName?: string; // Nombre de la plantilla (default: 'employee_invitation')
-}): Promise<{ success: boolean; messageId?: string; error?: string }> {
+}): Promise<{ success: boolean; messageId?: string; error?: string; errorCode?: number; errorType?: string; fullError?: any }> {
   const templateName = params.templateName || 'employee_invitation';
   
   // Construir el texto de sucursales
