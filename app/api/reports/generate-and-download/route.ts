@@ -215,18 +215,32 @@ export async function POST(request: Request) {
         protocolTimeout: 120000, // Timeout para protocolo (WebSocket)
       };
 
-      // Configuración específica para Mac
-      if (process.platform === 'darwin') {
-        try {
-          const executablePath = puppeteer.executablePath();
-          if (executablePath) {
-            launchOptions.executablePath = executablePath;
-            console.log('Usando Chromium en:', executablePath);
+      // Configurar executablePath para usar Chromium del sistema (Docker/Alpine)
+      const chromiumPath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium';
+      try {
+        // Verificar si existe el Chromium del sistema
+        const fs = await import('fs');
+        if (fs.existsSync(chromiumPath)) {
+          launchOptions.executablePath = chromiumPath;
+          console.log('Usando Chromium del sistema en:', chromiumPath);
+        } else {
+          // Intentar usar el Chromium de Puppeteer como fallback
+          try {
+            const executablePath = puppeteer.executablePath();
+            if (executablePath) {
+              launchOptions.executablePath = executablePath;
+              console.log('Usando Chromium de Puppeteer en:', executablePath);
+            }
+          } catch (e) {
+            console.warn('No se pudo obtener executablePath, usando default');
           }
-        } catch (e) {
-          console.warn('No se pudo obtener executablePath, usando default');
         }
-        // No usar --single-process en Mac, puede causar problemas
+      } catch (e) {
+        console.warn('Error verificando Chromium, usando default:', e);
+      }
+      
+      // Configuración adicional para Linux/Docker
+      if (process.platform !== 'darwin') {
         launchOptions.args.push('--disable-background-timer-throttling');
         launchOptions.args.push('--disable-backgrounding-occluded-windows');
         launchOptions.args.push('--disable-renderer-backgrounding');

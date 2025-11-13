@@ -175,10 +175,39 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
     if (reportHistory.format === 'pdf') {
       const puppeteer = await import('puppeteer');
-      const browser = await puppeteer.launch({ 
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-        headless: true,
-      });
+      const fs = await import('fs');
+      
+      // Configurar executablePath para usar Chromium del sistema (Docker/Alpine)
+      const chromiumPath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium';
+      const launchOptions: any = {
+        headless: 'new',
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--disable-accelerated-2d-canvas',
+        ],
+      };
+      
+      // Usar Chromium del sistema si existe
+      if (fs.existsSync(chromiumPath)) {
+        launchOptions.executablePath = chromiumPath;
+        console.log('Usando Chromium del sistema en:', chromiumPath);
+      } else {
+        // Fallback al Chromium de Puppeteer
+        try {
+          const executablePath = puppeteer.executablePath();
+          if (executablePath) {
+            launchOptions.executablePath = executablePath;
+            console.log('Usando Chromium de Puppeteer en:', executablePath);
+          }
+        } catch (e) {
+          console.warn('No se pudo obtener executablePath, usando default');
+        }
+      }
+      
+      const browser = await puppeteer.launch(launchOptions);
       const page = await browser.newPage();
       await page.setContent(html, { waitUntil: 'networkidle0' });
       const pdf = await page.pdf({ 
