@@ -68,12 +68,12 @@ export async function generateExcelReport(reportData: any[], startDate: string, 
       { header: 'Entrada', key: 'check_in', width: 10 },
       { header: 'Salida', key: 'check_out', width: 10 },
       { header: 'Horas Trabajadas', key: 'hours', width: 15 },
-      { header: 'Tardanza (min)', key: 'late', width: 15 },
-      { header: 'Tiempo Extra (h)', key: 'overtime', width: 15 },
+      { header: 'Tiempo No Laborado', key: 'not_worked', width: 18 },
       { header: 'Pago Base', key: 'base', width: 15 },
-      { header: 'Pago con Tardanza', key: 'with_late', width: 18 },
-      { header: 'Pago Extra', key: 'overtime_pay', width: 15 },
+      { header: 'Desc. Tardanza', key: 'late_deduction', width: 18 },
       { header: 'Total Pago', key: 'total', width: 15 },
+      { header: 'Tiempo Extra (h)', key: 'overtime', width: 15 },
+      { header: 'Compensación Extra', key: 'overtime_pay', width: 18 },
     ];
 
     // Estilo para encabezados
@@ -86,18 +86,22 @@ export async function generateExcelReport(reportData: any[], startDate: string, 
     sheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center' };
 
     emp.daily_breakdown.forEach((day: any) => {
+      const lateDeduction = day.late_minutes > 0 
+        ? parseFloat((day.base_payment - day.payment_with_late).toFixed(2))
+        : 0;
+      
       const row = sheet.addRow({
         date: day.date,
         branch: day.branch_name || 'Sin sucursal',
         check_in: day.check_in,
         check_out: day.check_out,
         hours: parseFloat(day.hours_worked),
-        late: parseFloat(day.late_minutes),
-        overtime: parseFloat(day.overtime_hours),
+        not_worked: 0, // Tiempo no laborado siempre 0 para estos reportes
         base: parseFloat(day.base_payment),
-        with_late: parseFloat(day.payment_with_late),
-        overtime_pay: parseFloat(day.overtime_payment),
+        late_deduction: lateDeduction,
         total: parseFloat(day.total_payment),
+        overtime: parseFloat(day.overtime_hours),
+        overtime_pay: parseFloat(day.overtime_payment),
       });
 
       // Resaltar filas con tardanza
@@ -107,12 +111,12 @@ export async function generateExcelReport(reportData: any[], startDate: string, 
           pattern: 'solid',
           fgColor: { argb: 'FFFFF2F2' },
         };
-        row.getCell('late').font = { color: { argb: 'FFDC2626' }, bold: true };
+        row.getCell('late_deduction').font = { color: { argb: 'FFDC2626' }, bold: true };
       }
     });
 
     // Formato de moneda para columnas de pago
-    ['base', 'with_late', 'overtime_pay', 'total'].forEach((col) => {
+    ['base', 'late_deduction', 'overtime_pay', 'total'].forEach((col) => {
       sheet.getColumn(col).numFmt = '$#,##0.00';
     });
 
@@ -123,12 +127,12 @@ export async function generateExcelReport(reportData: any[], startDate: string, 
       check_in: '',
       check_out: '',
       hours: parseFloat(emp.summary.total_hours),
-      late: parseFloat(emp.summary.total_late_minutes),
-      overtime: parseFloat(emp.summary.total_overtime),
+      not_worked: 0,
       base: '',
-      with_late: '',
-      overtime_pay: '',
+      late_deduction: '',
       total: parseFloat(emp.summary.total_payment),
+      overtime: parseFloat(emp.summary.total_overtime),
+      overtime_pay: '',
     });
     empSummaryRow.font = { bold: true };
     empSummaryRow.fill = {

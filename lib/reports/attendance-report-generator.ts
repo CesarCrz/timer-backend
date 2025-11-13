@@ -131,12 +131,13 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
           exitTime: day.check_out || '-',
           branchName: day.branch_name || 'Sin sucursal',
           workedHours: formatTimeWorked(day.hours_worked),
+          notWorkedHours: '0h', // Para reportes de negocio/sucursal, siempre 0h
           overtimeHours: day.overtime_hours > 0 ? `${day.overtime_hours}h` : '-',
           baseSalaryDay: formatCurrency(day.base_payment),
-          salaryWithLate: formatCurrency(day.payment_with_late),
+          lateDeduction: day.late_minutes > 0 ? formatCurrency(day.base_payment - day.payment_with_late) : '-',
+          overtimeCompensation: day.overtime_hours > 0 ? formatCurrency(day.overtime_payment) : '-',
           totalSalaryDay: formatCurrency(day.total_payment),
           isLate: day.is_late,
-          lateDeduction: day.late_minutes > 0 ? formatCurrency(day.base_payment - day.payment_with_late) : '-',
         });
         
         empInBranch.workedHours += day.hours_worked;
@@ -184,12 +185,13 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
           exitTime: day.check_out || '-',
           branchName: day.branch_name || 'Sin sucursal',
           workedHours: formatTimeWorked(day.hours_worked),
+          notWorkedHours: '0h',
           overtimeHours: day.overtime_hours > 0 ? `${day.overtime_hours}h` : '-',
           baseSalaryDay: formatCurrency(day.base_payment),
-          salaryWithLate: formatCurrency(day.payment_with_late),
+          lateDeduction: day.late_minutes > 0 ? formatCurrency(day.base_payment - day.payment_with_late) : '-',
+          overtimeCompensation: day.overtime_hours > 0 ? formatCurrency(day.overtime_payment) : '-',
           totalSalaryDay: formatCurrency(day.total_payment),
           isLate: day.is_late,
-          lateDeduction: day.late_minutes > 0 ? formatCurrency(day.base_payment - day.payment_with_late) : '-',
         })),
         workedHours: typeof emp.summary.total_hours === 'number' ? formatTimeWorked(emp.summary.total_hours) : emp.summary.total_hours,
         overtimeHours: typeof emp.summary.total_overtime === 'number' ? formatTimeWorked(emp.summary.total_overtime) : emp.summary.total_overtime,
@@ -294,6 +296,8 @@ function generateBranchSectionHTML(
     let dailyRows = '';
     emp.dailyRecords.forEach((record: any) => {
       const entryClass = record.entryTime === '-' ? 'cell-absent' : record.isLate ? 'cell-warning' : 'cell-success';
+      const notWorkedHours = record.notWorkedHours || '0h';
+      const overtimeCompensation = record.overtimeCompensation || '-';
       dailyRows += `
         <tr>
           <td class="cell-date">${record.date}</td>
@@ -301,10 +305,12 @@ function generateBranchSectionHTML(
           <td class="${entryClass}">${record.entryTime}</td>
           <td class="${record.exitTime === '-' ? 'cell-absent' : ''}">${record.exitTime}</td>
           <td>${record.workedHours}</td>
-          <td class="${record.overtimeHours !== '-' ? 'cell-success' : ''}">${record.overtimeHours}</td>
+          <td>${notWorkedHours}</td>
           <td>${record.baseSalaryDay}</td>
-          <td class="${record.lateDeduction !== '-' ? 'cell-error' : 'cell-success'}">${record.salaryWithLate}</td>
+          <td class="${record.lateDeduction !== '-' ? 'cell-error' : 'cell-success'}">${record.lateDeduction !== '-' ? record.lateDeduction : '-'}</td>
           <td class="cell-success" style="font-weight: 700;">${record.totalSalaryDay}</td>
+          <td class="${record.overtimeHours !== '-' ? 'cell-success' : ''}">${record.overtimeHours}</td>
+          <td class="${overtimeCompensation !== '-' ? 'cell-success' : ''}">${overtimeCompensation}</td>
         </tr>
       `;
     });
@@ -351,10 +357,12 @@ function generateBranchSectionHTML(
               <th>Entrada</th>
               <th>Salida</th>
               <th>Horas Trabajadas</th>
-              <th>Tiempo Extra</th>
+              <th>Tiempo No Laborado</th>
               <th>Sueldo Base Día</th>
-              <th>Sueldo con Tardanza</th>
+              <th>Desc. Tardanza</th>
               <th>Sueldo Total</th>
+              <th>Tiempo Extra</th>
+              <th>Compensación Extra</th>
             </tr>
           </thead>
           <tbody>
@@ -407,11 +415,11 @@ function generatePersonalSectionHTML(
         <td class="${record.exitTime === '-' ? 'cell-absent' : ''}">${record.exitTime}</td>
         <td>${record.workedHours}</td>
         <td>${record.notWorkedHours}</td>
-        <td class="${record.overtimeHours !== '-' ? 'cell-success' : ''}">${record.overtimeHours}</td>
         <td>${record.baseSalaryDay}</td>
         <td class="${record.lateDeduction !== '-' ? 'cell-error' : ''}">${record.lateDeduction}</td>
-        <td class="cell-success">${record.overtimeCompensation}</td>
         <td class="cell-success" style="font-weight: 700;">${record.totalSalaryDay}</td>
+        <td class="${record.overtimeHours !== '-' ? 'cell-success' : ''}">${record.overtimeHours}</td>
+        <td class="${record.overtimeCompensation !== '-' ? 'cell-success' : ''}">${record.overtimeCompensation}</td>
       </tr>
     `;
   });
@@ -446,11 +454,11 @@ function generatePersonalSectionHTML(
           <th>Salida</th>
           <th>Horas Trabajadas</th>
           <th>Tiempo No Laborado</th>
-          <th>Tiempo Extra</th>
           <th>Sueldo Base Día</th>
           <th>Desc. Tardanza</th>
-          <th>Compensación Extra</th>
           <th>Sueldo Total</th>
+          <th>Tiempo Extra</th>
+          <th>Compensación Extra</th>
         </tr>
       </thead>
       <tbody>
