@@ -53,6 +53,16 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
     return new Intl.NumberFormat('es-MX', { style: 'currency', currency: currency }).format(amount);
   };
 
+  // Función para formatear números con separadores de miles y 2 decimales, sin símbolo de moneda
+  const formatNumber = (amount: number) => {
+    // Redondear a 2 decimales para evitar problemas de precisión
+    const rounded = Math.round(amount * 100) / 100;
+    return new Intl.NumberFormat('es-MX', { 
+      minimumFractionDigits: 2, 
+      maximumFractionDigits: 2 
+    }).format(rounded);
+  };
+
   const formatDate = (dateStr: string) => {
     const date = dayjs(dateStr);
     return date.format('DD [de] MMMM [de] YYYY');
@@ -151,6 +161,7 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
       branch.totalEmployees = branch.employees.length;
       // Calcular total de horas trabajadas como número primero
       const totalHoursNumber = branch.employees.reduce((sum: number, e: any) => sum + e.workedHours, 0);
+      // Calcular total costo nómina sumando los salarios calculados (aún son números)
       const totalCostNumber = branch.employees.reduce((sum: number, e: any) => sum + e.calculatedSalary, 0);
       
       branch.employees.forEach((emp: any) => {
@@ -162,8 +173,8 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
       
       // Formatear el total de horas trabajadas después de formatear las individuales
       branch.totalWorkedHours = formatTimeWorked(totalHoursNumber);
-      // Formatear el total costo nómina con formato de moneda
-      branch.totalCost = formatCurrency(totalCostNumber);
+      // Formatear el total costo nómina con formato numérico (sin símbolo de moneda)
+      branch.totalCost = formatNumber(totalCostNumber);
     });
 
     // Generar HTML para cada sucursal
@@ -203,7 +214,8 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
       })),
       totalEmployees: reportData.length,
       totalWorkedHours: formatTimeWorked(reportData.reduce((sum, emp) => sum + (typeof emp.summary.total_hours === 'number' ? emp.summary.total_hours : 0), 0)),
-      totalCost: formatCurrency(reportData.reduce((sum, emp) => sum + emp.summary.total_payment, 0)),
+      // Calcular y formatear total costo nómina
+      totalCost: formatNumber(reportData.reduce((sum, emp) => sum + emp.summary.total_payment, 0)),
     };
 
     reportContent = generateBranchSectionHTML(branchData, formatCurrency, formatTimeWorked, businessName, branchHoursStart, branchHoursEnd);
