@@ -19,15 +19,58 @@ export async function GET(request: NextRequest) {
   const supabase = createServiceRoleClient();
 
   try {
-    // Calcular rango de la semana actual (lunes a domingo)
-    const now = dayjs();
-    const startOfWeek = now.startOf('week').add(1, 'day'); // Lunes (dayjs usa domingo como inicio por defecto)
-    const endOfWeek = startOfWeek.add(6, 'days'); // Domingo
+    // Calcular rango de la quincena actual
+    const now = dayjs().tz('America/Mexico_City');
+    const currentDay = now.date();
+    const currentMonth = now.month() + 1; // dayjs usa 0-11, necesitamos 1-12
+    const currentYear = now.year();
     
-    const startDate = startOfWeek.format('YYYY-MM-DD');
-    const endDate = endOfWeek.format('YYYY-MM-DD');
+    let startDate: string;
+    let endDate: string;
+    let periodType: 'first' | 'second';
+    
+    // Determinar qué quincena generar basado en el día actual
+    if (currentDay === 15) {
+      // Primera quincena: día 1 al 15
+      startDate = dayjs(`${currentYear}-${currentMonth}-01`).format('YYYY-MM-DD');
+      endDate = dayjs(`${currentYear}-${currentMonth}-15`).format('YYYY-MM-DD');
+      periodType = 'first';
+    } else {
+      // Segunda quincena: día 16 al último día del mes
+      // Verificar si es el último día del mes
+      const lastDayOfMonth = dayjs(`${currentYear}-${currentMonth}-01`).endOf('month').date();
+      
+      if (currentDay === lastDayOfMonth || (currentDay >= 28 && currentDay <= 31)) {
+        // Verificar que realmente sea el último día del mes
+        const actualLastDay = dayjs(`${currentYear}-${currentMonth}-01`).endOf('month').date();
+        if (currentDay === actualLastDay) {
+          startDate = dayjs(`${currentYear}-${currentMonth}-16`).format('YYYY-MM-DD');
+          endDate = dayjs(`${currentYear}-${currentMonth}-${actualLastDay}`).format('YYYY-MM-DD');
+          periodType = 'second';
+        } else {
+          // Si no es el último día, no generar reporte
+          console.log(`ℹ️ [QUINCENAL REPORTS] No es día de generación de reporte (día ${currentDay}, último día del mes es ${actualLastDay})`);
+          return Response.json({ 
+            success: true, 
+            generated: 0, 
+            message: 'Not a report generation day',
+            currentDay,
+            lastDayOfMonth: actualLastDay,
+          });
+        }
+      } else {
+        // No es día de generación de reporte
+        console.log(`ℹ️ [QUINCENAL REPORTS] No es día de generación de reporte (día ${currentDay})`);
+        return Response.json({ 
+          success: true, 
+          generated: 0, 
+          message: 'Not a report generation day',
+          currentDay,
+        });
+      }
+    }
 
-    console.log(`📊 [WEEKLY REPORTS] Generando reportes semanales para la semana ${startDate} a ${endDate}`);
+    console.log(`📊 [QUINCENAL REPORTS] Generando reportes quincenales para ${periodType === 'first' ? 'primera' : 'segunda'} quincena: ${startDate} a ${endDate}`);
 
     // Obtener todos los negocios activos con sus dueños
     const { data: businesses, error: businessesError } = await supabase
@@ -35,12 +78,12 @@ export async function GET(request: NextRequest) {
       .select('id, name, currency, owner_id, owner_name');
 
     if (businessesError) {
-      console.error('❌ [WEEKLY REPORTS] Error obteniendo negocios:', businessesError);
+      console.error('❌ [QUINCENAL REPORTS] Error obteniendo negocios:', businessesError);
       return Response.json({ error: 'Failed to fetch businesses' }, { status: 500 });
     }
 
     if (!businesses || businesses.length === 0) {
-      console.log('ℹ️ [WEEKLY REPORTS] No hay negocios para generar reportes');
+      console.log('ℹ️ [QUINCENAL REPORTS] No hay negocios para generar reportes');
       return Response.json({ success: true, generated: 0, message: 'No businesses found' });
     }
 
@@ -55,7 +98,7 @@ export async function GET(request: NextRequest) {
         const { data: ownerData, error: ownerError } = await supabase.auth.admin.getUserById(business.owner_id);
         
         if (ownerError || !ownerData?.user?.email) {
-          console.warn(`⚠️ [WEEKLY REPORTS] No se pudo obtener email del dueño para negocio ${business.name} (${business.id})`);
+          console.warn(`⚠️ [QUINCENAL REPORTS] No se pudo obtener email del dueño para negocio ${business.name} (${business.id})`);
           errorCount++;
           errors.push(`Negocio ${business.name}: No se encontró email del dueño`);
           continue;
@@ -71,7 +114,7 @@ export async function GET(request: NextRequest) {
           .eq('status', 'active');
 
         if (!businessEmployees || businessEmployees.length === 0) {
-          console.log(`ℹ️ [WEEKLY REPORTS] Negocio ${business.name} no tiene empleados activos, saltando...`);
+          console.log(`ℹ️ [QUINCENAL REPORTS] Negocio ${business.name} no tiene empleados activos, saltando...`);
           continue;
         }
 
@@ -92,14 +135,14 @@ export async function GET(request: NextRequest) {
           .order('check_in_time', { ascending: true });
 
         if (recordsError) {
-          console.error(`❌ [WEEKLY REPORTS] Error obteniendo registros para ${business.name}:`, recordsError);
+          console.error(`❌ [QUINCENAL REPORTS] Error obteniendo registros para ${business.name}:`, recordsError);
           errorCount++;
           errors.push(`Negocio ${business.name}: Error obteniendo registros`);
           continue;
         }
 
         if (!records || records.length === 0) {
-          console.log(`ℹ️ [WEEKLY REPORTS] Negocio ${business.name} no tiene registros para la semana, saltando...`);
+          console.log(`ℹ️ [QUINCENAL REPORTS] Negocio ${business.name} no tiene registros para la quincena, saltando...`);
           continue;
         }
 
@@ -141,7 +184,7 @@ export async function GET(request: NextRequest) {
           });
 
         if (reportData.length === 0) {
-          console.log(`ℹ️ [WEEKLY REPORTS] Negocio ${business.name} no tiene datos válidos para el reporte, saltando...`);
+          console.log(`ℹ️ [QUINCENAL REPORTS] Negocio ${business.name} no tiene datos válidos para el reporte, saltando...`);
           continue;
         }
 
@@ -218,12 +261,13 @@ export async function GET(request: NextRequest) {
           expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         });
 
-        const filename = `reporte-semanal-${business.name.replace(/\s+/g, '-').toLowerCase()}-${startDate}-${endDate}.pdf`;
+        const periodLabel = periodType === 'first' ? 'primera-quincena' : 'segunda-quincena';
+        const filename = `reporte-quincenal-${periodLabel}-${business.name.replace(/\s+/g, '-').toLowerCase()}-${startDate}-${endDate}.pdf`;
 
         // Enviar email con adjunto
         await sendEmailWithAttachment({
           to: ownerEmail,
-          subject: `📊 Reporte Semanal de Asistencia - ${business.name}`,
+          subject: `📊 Reporte Quincenal de Asistencia - ${business.name} (${startDate} al ${endDate})`,
           html: emailHtml,
           attachments: [
             {
@@ -234,11 +278,11 @@ export async function GET(request: NextRequest) {
           ],
         });
 
-        console.log(`✅ [WEEKLY REPORTS] Reporte enviado exitosamente a ${ownerEmail} para negocio ${business.name}`);
+        console.log(`✅ [QUINCENAL REPORTS] Reporte enviado exitosamente a ${ownerEmail} para negocio ${business.name}`);
         successCount++;
 
       } catch (error: any) {
-        console.error(`❌ [WEEKLY REPORTS] Error procesando negocio ${business.name}:`, error);
+        console.error(`❌ [QUINCENAL REPORTS] Error procesando negocio ${business.name}:`, error);
         errorCount++;
         errors.push(`Negocio ${business.name}: ${error.message || 'Error desconocido'}`);
       }
@@ -249,12 +293,17 @@ export async function GET(request: NextRequest) {
       generated: successCount,
       errors: errorCount,
       errorDetails: errors.length > 0 ? errors : undefined,
-      week: { startDate, endDate },
+      period: { 
+        type: periodType, 
+        startDate, 
+        endDate,
+        label: periodType === 'first' ? 'Primera Quincena' : 'Segunda Quincena',
+      },
     });
 
   } catch (error: any) {
-    console.error('❌ [WEEKLY REPORTS] Error general:', error);
-    return Response.json({ error: 'Failed to generate weekly reports' }, { status: 500 });
+    console.error('❌ [QUINCENAL REPORTS] Error general:', error);
+    return Response.json({ error: 'Failed to generate quincenal reports' }, { status: 500 });
   }
 }
 
