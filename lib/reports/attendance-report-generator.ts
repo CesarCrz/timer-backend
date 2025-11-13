@@ -151,7 +151,7 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
       branch.totalEmployees = branch.employees.length;
       // Calcular total de horas trabajadas como número primero
       const totalHoursNumber = branch.employees.reduce((sum: number, e: any) => sum + e.workedHours, 0);
-      branch.totalCost = branch.employees.reduce((sum: number, e: any) => sum + e.calculatedSalary, 0);
+      const totalCostNumber = branch.employees.reduce((sum: number, e: any) => sum + e.calculatedSalary, 0);
       
       branch.employees.forEach((emp: any) => {
         emp.workedHours = formatTimeWorked(emp.workedHours);
@@ -162,6 +162,8 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
       
       // Formatear el total de horas trabajadas después de formatear las individuales
       branch.totalWorkedHours = formatTimeWorked(totalHoursNumber);
+      // Formatear el total costo nómina con formato de moneda
+      branch.totalCost = formatCurrency(totalCostNumber);
     });
 
     // Generar HTML para cada sucursal
