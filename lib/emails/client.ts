@@ -10,7 +10,7 @@ type Attachment = {
 };
 
 export async function sendEmail(params: { to: string; subject: string; html: string; from?: string; attachments?: Attachment[] }) {
-  const from = params.from || 'no-reply@timer.app';
+  const from = params.from || 'no-reply@ceats.app';
   
   try {
     // Resend espera attachments como array de objetos con content como string (base64)

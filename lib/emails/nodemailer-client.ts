@@ -17,7 +17,7 @@ export async function sendEmailWithAttachment(params: {
   from?: string; 
   attachments?: Attachment[] 
 }) {
-  const from = params.from || process.env.SMTP_FROM || 'no-reply@timer.app';
+  const from = params.from || process.env.SMTP_FROM || 'no-reply@ceats.app';
   
   // Configurar transporter de Nodemailer
   // Si hay variables de entorno de SMTP, usarlas; si no, usar Gmail
