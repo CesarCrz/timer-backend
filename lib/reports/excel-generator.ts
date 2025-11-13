@@ -64,6 +64,7 @@ export async function generateExcelReport(reportData: any[], startDate: string, 
     
     sheet.columns = [
       { header: 'Fecha', key: 'date', width: 12 },
+      { header: 'Sucursal', key: 'branch', width: 20 },
       { header: 'Entrada', key: 'check_in', width: 10 },
       { header: 'Salida', key: 'check_out', width: 10 },
       { header: 'Horas Trabajadas', key: 'hours', width: 15 },
@@ -73,7 +74,6 @@ export async function generateExcelReport(reportData: any[], startDate: string, 
       { header: 'Pago con Tardanza', key: 'with_late', width: 18 },
       { header: 'Pago Extra', key: 'overtime_pay', width: 15 },
       { header: 'Total Pago', key: 'total', width: 15 },
-      { header: 'Sucursal', key: 'branch', width: 20 },
     ];
 
     // Estilo para encabezados
@@ -88,6 +88,7 @@ export async function generateExcelReport(reportData: any[], startDate: string, 
     emp.daily_breakdown.forEach((day: any) => {
       const row = sheet.addRow({
         date: day.date,
+        branch: day.branch_name || 'Sin sucursal',
         check_in: day.check_in,
         check_out: day.check_out,
         hours: parseFloat(day.hours_worked),
@@ -97,7 +98,6 @@ export async function generateExcelReport(reportData: any[], startDate: string, 
         with_late: parseFloat(day.payment_with_late),
         overtime_pay: parseFloat(day.overtime_payment),
         total: parseFloat(day.total_payment),
-        branch: day.branch_name || '-',
       });
 
       // Resaltar filas con tardanza
@@ -119,6 +119,7 @@ export async function generateExcelReport(reportData: any[], startDate: string, 
     // Agregar fila de resumen del empleado
     const empSummaryRow = sheet.addRow({
       date: 'RESUMEN',
+      branch: '',
       check_in: '',
       check_out: '',
       hours: parseFloat(emp.summary.total_hours),
@@ -128,7 +129,6 @@ export async function generateExcelReport(reportData: any[], startDate: string, 
       with_late: '',
       overtime_pay: '',
       total: parseFloat(emp.summary.total_payment),
-      branch: '',
     });
     empSummaryRow.font = { bold: true };
     empSummaryRow.fill = {

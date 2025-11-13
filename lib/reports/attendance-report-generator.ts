@@ -129,6 +129,7 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
           date: day.date,
           entryTime: day.check_in,
           exitTime: day.check_out || '-',
+          branchName: day.branch_name || 'Sin sucursal',
           workedHours: formatTimeWorked(day.hours_worked),
           overtimeHours: day.overtime_hours > 0 ? `${day.overtime_hours}h` : '-',
           baseSalaryDay: formatCurrency(day.base_payment),
@@ -181,6 +182,7 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
           date: day.date,
           entryTime: day.check_in,
           exitTime: day.check_out || '-',
+          branchName: day.branch_name || 'Sin sucursal',
           workedHours: formatTimeWorked(day.hours_worked),
           overtimeHours: day.overtime_hours > 0 ? `${day.overtime_hours}h` : '-',
           baseSalaryDay: formatCurrency(day.base_payment),
@@ -215,6 +217,7 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
           date: day.date,
           entryTime: day.check_in,
           exitTime: day.check_out || '-',
+          branchName: day.branch_name || 'Sin sucursal',
           workedHours: formatTimeWorked(day.hours_worked),
           notWorkedHours: '0h',
           overtimeHours: day.overtime_hours > 0 ? `${day.overtime_hours}h` : '-',
@@ -294,6 +297,7 @@ function generateBranchSectionHTML(
       dailyRows += `
         <tr>
           <td class="cell-date">${record.date}</td>
+          <td>${record.branchName || 'Sin sucursal'}</td>
           <td class="${entryClass}">${record.entryTime}</td>
           <td class="${record.exitTime === '-' ? 'cell-absent' : ''}">${record.exitTime}</td>
           <td>${record.workedHours}</td>
@@ -343,6 +347,7 @@ function generateBranchSectionHTML(
           <thead>
             <tr>
               <th>Día</th>
+              <th>Sucursal</th>
               <th>Entrada</th>
               <th>Salida</th>
               <th>Horas Trabajadas</th>
@@ -397,6 +402,7 @@ function generatePersonalSectionHTML(
     dailyRows += `
       <tr>
         <td class="cell-date">${record.date}</td>
+        <td>${record.branchName || 'Sin sucursal'}</td>
         <td class="${entryClass}">${record.entryTime}</td>
         <td class="${record.exitTime === '-' ? 'cell-absent' : ''}">${record.exitTime}</td>
         <td>${record.workedHours}</td>
@@ -435,6 +441,7 @@ function generatePersonalSectionHTML(
       <thead>
         <tr>
           <th>Día</th>
+          <th>Sucursal</th>
           <th>Entrada</th>
           <th>Salida</th>
           <th>Horas Trabajadas</th>
