@@ -40,7 +40,8 @@ RUN adduser --system --uid 1001 nextjs
 # Copy necessary files from standalone build
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+# Create public directory (Next.js standalone doesn't require it, but create it to be safe)
+RUN mkdir -p ./public && chown nextjs:nodejs ./public
 
 USER nextjs
 
