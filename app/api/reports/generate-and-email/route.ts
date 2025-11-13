@@ -332,7 +332,13 @@ export async function POST(request: Request) {
     }
 
     // Enviar al correo del usuario automáticamente
-    const toEmails = [user.email as string];
+    if (!user.email) {
+      return withCors(origin, Response.json({ 
+        error: 'El usuario no tiene un email configurado' 
+      }, { status: 400 }));
+    }
+    
+    const toEmails = [user.email];
     // Si se proporciona un email adicional, agregarlo
     if (params.email && params.email !== user.email) {
       toEmails.push(params.email);

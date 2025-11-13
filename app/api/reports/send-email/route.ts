@@ -22,7 +22,13 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { report_url, email } = schema.parse(body);
 
-    const to = email || (user.email as string);
+    if (!email && !user.email) {
+      return withCors(origin, Response.json({ 
+        error: 'No se proporcionó un email y el usuario no tiene email configurado' 
+      }, { status: 400 }));
+    }
+    
+    const to = email || user.email!;
     const { subject, html } = renderTemplate('report-ready', { reportUrl: report_url });
     await sendEmail({ to, subject, html });
 

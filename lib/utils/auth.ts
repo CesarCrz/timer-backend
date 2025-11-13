@@ -61,7 +61,6 @@ export async function getUserBusinessId(userId: string) {
       
       if (!userError && userData?.user) {
         ownerName = userData.user.user_metadata?.full_name 
-          || userData.user.raw_user_meta_data?.full_name 
           || userData.user.email 
           || null;
       }

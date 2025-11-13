@@ -52,6 +52,12 @@ export async function POST(request: Request) {
       customerId = existingSubscription.stripe_customer_id;
     } else {
       // Crear nuevo customer
+      if (!user.email) {
+        return withCors(origin, Response.json({ 
+          error: 'El usuario no tiene un email configurado' 
+        }, { status: 400 }));
+      }
+      
       const customer = await stripe.customers.create({
         email: user.email,
         metadata: {
