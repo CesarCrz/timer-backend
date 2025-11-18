@@ -6,9 +6,24 @@ import { handleApiError, NotFoundError } from '@/lib/utils/errors';
 const updateSchema = z.object({
   full_name: z.string().min(3).max(100).optional(),
   phone: z.string().regex(/^\+[1-9]\d{1,14}$/).optional(),
-  hourly_rate: z.number().positive().max(10000).optional(),
+  hourly_rate: z.number().min(1).max(10000).optional(), // Changed from positive() to min(1)
   status: z.enum(['pending', 'active', 'inactive']).optional(),
   branch_ids: z.array(z.string().uuid()).optional(), // Permite array vacío para desactivar de todas las sucursales
+  // Premium features: horarios por sucursal
+  branch_hours: z.record(
+    z.string().uuid(),
+    z.object({
+      start: z.union([
+        z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/),
+        z.literal(''),
+      ]).optional(),
+      end: z.union([
+        z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/),
+        z.literal(''),
+      ]).optional(),
+      tolerance: z.number().min(0).max(59).optional(),
+    })
+  ).optional(),
 });
 
 export async function OPTIONS(request: Request) {
@@ -34,10 +49,75 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
       .single();
     if (!existing || existing.business_id !== businessId) throw new NotFoundError('Employee');
 
-    const { branch_ids, ...empUpdates } = updates;
+    // Check if user has premium subscription (not basic)
+    const { data: subscription } = await supabase
+      .from('user_subscriptions')
+      .select('tier:subscription_tiers(name)')
+      .eq('business_id', businessId)
+      .eq('status', 'active')
+      .single();
+
+    const tierName = subscription?.tier && !Array.isArray(subscription.tier) 
+      ? subscription.tier.name 
+      : null;
+    const isPremium = tierName !== null && tierName !== 'Básico';
+
+    // Validate premium features: branch_hours
+    if (!isPremium && updates.branch_hours && Object.keys(updates.branch_hours).length > 0) {
+      return withCors(origin, Response.json(
+        {
+          error: 'Premium feature required',
+          code: 'PREMIUM_REQUIRED',
+          message: 'Los horarios específicos por sucursal están disponibles solo para planes Premium. Actualiza tu plan para utilizar esta característica.',
+        },
+        { status: 403 }
+      ));
+    }
+
+    // Validate branch_hours if provided
+    if (isPremium && updates.branch_hours) {
+      for (const [branchId, hours] of Object.entries(updates.branch_hours)) {
+        const h = hours as { start?: string; end?: string; tolerance?: number };
+        // Si se proporciona start o end, ambos deben estar presentes
+        if ((h.start && !h.end) || (!h.start && h.end)) {
+          return withCors(origin, Response.json(
+            {
+              error: 'Validation error',
+              code: 'VALIDATION_ERROR',
+              message: `Para la sucursal ${branchId}, si especificas un horario, debes proporcionar tanto la hora de inicio como la de fin.`,
+            },
+            { status: 400 }
+          ));
+        }
+        
+        // Si ambos están presentes, validar que start < end
+        if (h.start && h.end) {
+          const [startHour, startMin] = h.start.split(':').map(Number);
+          const [endHour, endMin] = h.end.split(':').map(Number);
+          const startMinutes = startHour * 60 + startMin;
+          const endMinutes = endHour * 60 + endMin;
+
+          if (startMinutes >= endMinutes) {
+            return withCors(origin, Response.json(
+              {
+                error: 'Validation error',
+                code: 'VALIDATION_ERROR',
+                message: `Para la sucursal ${branchId}, la hora de inicio debe ser menor que la hora de fin.`,
+              },
+              { status: 400 }
+            ));
+          }
+        }
+      }
+    }
+
+    const { branch_ids, branch_hours, ...empUpdates } = updates;
+    
+    // Prepare employee updates (sin horarios, esos van a employee_branches)
+    const employeeData: any = { ...empUpdates };
     const { data: updated, error: updateError } = await supabase
       .from('employees')
-      .update(empUpdates)
+      .update(employeeData)
       .eq('id', employeeId)
       .select()
       .single();
@@ -56,45 +136,70 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
       const currentBranchIds = currentBranches?.map(eb => eb.branch_id) || [];
       const newBranchIds = branch_ids || [];
 
-      // Sucursales a desactivar (estaban activas pero ya no están en la lista)
-      const branchesToDeactivate = currentBranchIds.filter(bid => !newBranchIds.includes(bid));
-      if (branchesToDeactivate.length > 0) {
+      // Sucursales a ELIMINAR (estaban en la lista pero ya no están)
+      // IMPORTANTE: Eliminar completamente, no solo desactivar
+      const branchesToRemove = currentBranchIds.filter(bid => !newBranchIds.includes(bid));
+      if (branchesToRemove.length > 0) {
         await supabase
           .from('employee_branches')
-          .update({ status: 'inactive' })
+          .delete()
           .eq('employee_id', employeeId)
-          .in('branch_id', branchesToDeactivate);
+          .in('branch_id', branchesToRemove);
       }
 
-      // Sucursales a activar/reactivar (están en la nueva lista)
-      const branchesToActivate = newBranchIds.filter(bid => !currentBranchIds.includes(bid));
-      if (branchesToActivate.length > 0) {
-        // Verificar si ya existen relaciones inactivas para reactivarlas
-        const { data: existingInactive } = await supabase
+      // Sucursales a agregar (están en la nueva lista pero no en la actual)
+      const branchesToAdd = newBranchIds.filter(bid => !currentBranchIds.includes(bid));
+      if (branchesToAdd.length > 0) {
+        // Insertar nuevas relaciones (siempre como 'active')
+        const rowsToInsert = branchesToAdd.map((bid) => {
+          const row: any = { 
+            employee_id: employeeId, 
+            branch_id: bid, 
+            status: 'active' 
+          };
+          
+          // Aplicar horarios si están presentes en branch_hours
+          if (branch_hours && branch_hours[bid]) {
+            const hours = branch_hours[bid];
+            if (hours.start && hours.end) {
+              row.employees_hours_start = hours.start;
+              row.employees_hours_end = hours.end;
+              row.tolerance_minutes = hours.tolerance || 0;
+            }
+          }
+          
+          return row;
+        });
+        
+        await supabase
           .from('employee_branches')
-          .select('branch_id')
-          .eq('employee_id', employeeId)
-          .in('branch_id', branchesToActivate)
-          .eq('status', 'inactive');
-
-        const existingInactiveIds = existingInactive?.map(eb => eb.branch_id) || [];
-        const toReactivate = branchesToActivate.filter(bid => existingInactiveIds.includes(bid));
-        const toInsert = branchesToActivate.filter(bid => !existingInactiveIds.includes(bid));
-
-        // Reactivar relaciones existentes
-        if (toReactivate.length > 0) {
-          await supabase
-            .from('employee_branches')
-            .update({ status: 'active' })
-            .eq('employee_id', employeeId)
-            .in('branch_id', toReactivate);
-        }
-
-        // Insertar nuevas relaciones
-        if (toInsert.length > 0) {
-          await supabase
-            .from('employee_branches')
-            .insert(toInsert.map((bid) => ({ employee_id: employeeId, branch_id: bid, status: 'active' })));
+          .insert(rowsToInsert);
+      }
+      
+      // Actualizar horarios de sucursales existentes si branch_hours está presente
+      if (branch_hours) {
+        for (const [branchId, hours] of Object.entries(branch_hours)) {
+          // Solo actualizar si la sucursal está en la lista actual
+          if (newBranchIds.includes(branchId)) {
+            const updateData: any = {};
+            
+            if (hours.start && hours.end) {
+              updateData.employees_hours_start = hours.start;
+              updateData.employees_hours_end = hours.end;
+              updateData.tolerance_minutes = hours.tolerance || 0;
+            } else {
+              // Si se envía vacío, eliminar horarios específicos (usar horario de sucursal)
+              updateData.employees_hours_start = null;
+              updateData.employees_hours_end = null;
+              updateData.tolerance_minutes = null;
+            }
+            
+            await supabase
+              .from('employee_branches')
+              .update(updateData)
+              .eq('employee_id', employeeId)
+              .eq('branch_id', branchId);
+          }
         }
       }
     }

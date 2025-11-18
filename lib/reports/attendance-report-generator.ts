@@ -135,19 +135,34 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
         }
         
         // Agregar registro diario
+        // Calcular tiempo no laborado (en horas)
+        const unpaidHours = day.unpaid_minutes ? day.unpaid_minutes / 60 : 0;
+        const notWorkedHoursFormatted = unpaidHours > 0 ? formatTimeWorked(unpaidHours) : '0h';
+        
+        // Usar late_deduction del cálculo si está disponible, sino calcular
+        const lateDeductionAmount = day.late_deduction !== undefined 
+          ? day.late_deduction 
+          : (day.late_minutes > 0 ? day.base_payment - day.payment_with_late : 0);
+        
+        // Indicar si la salida fue automática
+        const exitTimeDisplay = day.is_auto_closed 
+          ? `${day.check_out} (Auto)` 
+          : (day.check_out || '-');
+        
         empInBranch.dailyRecords.push({
           date: day.date,
           entryTime: day.check_in,
-          exitTime: day.check_out || '-',
+          exitTime: exitTimeDisplay,
           branchName: day.branch_name || 'Sin sucursal',
           workedHours: formatTimeWorked(day.hours_worked),
-          notWorkedHours: '0h', // Para reportes de negocio/sucursal, siempre 0h
+          notWorkedHours: notWorkedHoursFormatted,
           overtimeHours: day.overtime_hours > 0 ? `${day.overtime_hours}h` : '-',
           baseSalaryDay: formatCurrency(day.base_payment),
-          lateDeduction: day.late_minutes > 0 ? formatCurrency(day.base_payment - day.payment_with_late) : '-',
+          lateDeduction: lateDeductionAmount > 0 ? formatCurrency(lateDeductionAmount) : '-',
           overtimeCompensation: day.overtime_hours > 0 ? formatCurrency(day.overtime_payment) : '-',
           totalSalaryDay: formatCurrency(day.total_payment),
           isLate: day.is_late,
+          isAutoClosed: day.is_auto_closed || false,
         });
         
         empInBranch.workedHours += day.hours_worked;
@@ -179,7 +194,7 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
 
     // Generar HTML para cada sucursal
     Object.values(byBranch).forEach((branch: any) => {
-      reportContent += generateBranchSectionHTML(branch, formatCurrency, formatTimeWorked, businessName, branch.hoursStart, branch.hoursEnd);
+      reportContent += generateBranchSectionHTML(branch, formatCurrency, formatTimeWorked, businessName, branch.hoursStart, branch.hoursEnd, reportData);
     });
   } else if (reportType === 'branch') {
     // Reporte de una sucursal específica
@@ -192,20 +207,32 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
         id: emp.employee_id || '',
         email: emp.employee_email || '',
         phone: emp.employee_phone || '',
-        dailyRecords: emp.daily_breakdown.map((day: any) => ({
-          date: day.date,
-          entryTime: day.check_in,
-          exitTime: day.check_out || '-',
-          branchName: day.branch_name || 'Sin sucursal',
-          workedHours: formatTimeWorked(day.hours_worked),
-          notWorkedHours: '0h',
-          overtimeHours: day.overtime_hours > 0 ? `${day.overtime_hours}h` : '-',
-          baseSalaryDay: formatCurrency(day.base_payment),
-          lateDeduction: day.late_minutes > 0 ? formatCurrency(day.base_payment - day.payment_with_late) : '-',
-          overtimeCompensation: day.overtime_hours > 0 ? formatCurrency(day.overtime_payment) : '-',
-          totalSalaryDay: formatCurrency(day.total_payment),
-          isLate: day.is_late,
-        })),
+        dailyRecords: emp.daily_breakdown.map((day: any) => {
+          const unpaidHours = day.unpaid_minutes ? day.unpaid_minutes / 60 : 0;
+          const notWorkedHoursFormatted = unpaidHours > 0 ? formatTimeWorked(unpaidHours) : '0h';
+          const lateDeductionAmount = day.late_deduction !== undefined 
+            ? day.late_deduction 
+            : (day.late_minutes > 0 ? day.base_payment - day.payment_with_late : 0);
+          const exitTimeDisplay = day.is_auto_closed 
+            ? `${day.check_out} (Auto)` 
+            : (day.check_out || '-');
+          
+          return {
+            date: day.date,
+            entryTime: day.check_in,
+            exitTime: exitTimeDisplay,
+            branchName: day.branch_name || 'Sin sucursal',
+            workedHours: formatTimeWorked(day.hours_worked),
+            notWorkedHours: notWorkedHoursFormatted,
+            overtimeHours: day.overtime_hours > 0 ? `${day.overtime_hours}h` : '-',
+            baseSalaryDay: formatCurrency(day.base_payment),
+            lateDeduction: lateDeductionAmount > 0 ? formatCurrency(lateDeductionAmount) : '-',
+            overtimeCompensation: day.overtime_hours > 0 ? formatCurrency(day.overtime_payment) : '-',
+            totalSalaryDay: formatCurrency(day.total_payment),
+            isLate: day.is_late,
+            isAutoClosed: day.is_auto_closed || false,
+          };
+        }),
         workedHours: typeof emp.summary.total_hours === 'number' ? formatTimeWorked(emp.summary.total_hours) : emp.summary.total_hours,
         overtimeHours: typeof emp.summary.total_overtime === 'number' ? formatTimeWorked(emp.summary.total_overtime) : emp.summary.total_overtime,
         absenceHours: '0h',
@@ -218,7 +245,7 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
       totalCost: formatNumber(reportData.reduce((sum, emp) => sum + emp.summary.total_payment, 0)),
     };
 
-    reportContent = generateBranchSectionHTML(branchData, formatCurrency, formatTimeWorked, businessName, branchHoursStart, branchHoursEnd);
+    reportContent = generateBranchSectionHTML(branchData, formatCurrency, formatTimeWorked, businessName, branchHoursStart, branchHoursEnd, reportData);
   } else if (reportType === 'personal') {
     // Reporte personal de un empleado
     const emp = reportData[0];
@@ -228,21 +255,34 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
         id: employeeId || '',
         email: employeeEmail || '',
         phone: employeePhone || '',
+        hourlyRate: emp.hourly_rate || 0,
         baseSalary: formatCurrency(emp.hourly_rate * 8 * 30), // Estimado mensual
-        dailyRecords: emp.daily_breakdown.map((day: any) => ({
-          date: day.date,
-          entryTime: day.check_in,
-          exitTime: day.check_out || '-',
-          branchName: day.branch_name || 'Sin sucursal',
-          workedHours: formatTimeWorked(day.hours_worked),
-          notWorkedHours: '0h',
-          overtimeHours: day.overtime_hours > 0 ? `${day.overtime_hours}h` : '-',
-          baseSalaryDay: formatCurrency(day.base_payment),
-          lateDeduction: day.late_minutes > 0 ? formatCurrency(day.base_payment - day.payment_with_late) : '-',
-          overtimeCompensation: formatCurrency(day.overtime_payment),
-          totalSalaryDay: formatCurrency(day.total_payment),
-          isLate: day.is_late,
-        })),
+        dailyRecords: emp.daily_breakdown.map((day: any) => {
+          const unpaidHours = day.unpaid_minutes ? day.unpaid_minutes / 60 : 0;
+          const notWorkedHoursFormatted = unpaidHours > 0 ? formatTimeWorked(unpaidHours) : '0h';
+          const lateDeductionAmount = day.late_deduction !== undefined 
+            ? day.late_deduction 
+            : (day.late_minutes > 0 ? day.base_payment - day.payment_with_late : 0);
+          const exitTimeDisplay = day.is_auto_closed 
+            ? `${day.check_out} (Auto)` 
+            : (day.check_out || '-');
+          
+          return {
+            date: day.date,
+            entryTime: day.check_in,
+            exitTime: exitTimeDisplay,
+            branchName: day.branch_name || 'Sin sucursal',
+            workedHours: formatTimeWorked(day.hours_worked),
+            notWorkedHours: notWorkedHoursFormatted,
+            overtimeHours: day.overtime_hours > 0 ? `${day.overtime_hours}h` : '-',
+            baseSalaryDay: formatCurrency(day.base_payment),
+            lateDeduction: lateDeductionAmount > 0 ? formatCurrency(lateDeductionAmount) : '-',
+            overtimeCompensation: day.overtime_hours > 0 ? formatCurrency(day.overtime_payment) : '-',
+            totalSalaryDay: formatCurrency(day.total_payment),
+            isLate: day.is_late,
+            isAutoClosed: day.is_auto_closed || false,
+          };
+        }),
         totalWorkedHours: typeof emp.summary.total_hours === 'number' ? formatTimeWorked(emp.summary.total_hours) : emp.summary.total_hours,
         calculatedSalary: formatCurrency(emp.summary.total_payment),
       },
@@ -293,7 +333,8 @@ function generateBranchSectionHTML(
   formatTimeWorked: (h: number) => string,
   businessName: string,
   hoursStart?: string,
-  hoursEnd?: string
+  hoursEnd?: string,
+  reportData?: any[]
 ): string {
   // Formatear horas de la sucursal (pueden venir como HH:MM:SS o HH:MM)
   const formatBranchHours = (time: string | undefined) => {
@@ -329,12 +370,16 @@ function generateBranchSectionHTML(
       `;
     });
 
+    // Obtener tarifa por hora del empleado (buscar en reportData si está disponible, sino usar 0)
+    const employeeData = reportData?.find((e: any) => e.employee_name === emp.name);
+    const hourlyRate = employeeData?.hourly_rate || emp.hourlyRate || 0;
+    
     employeesHTML += `
       <div class="employee-section">
         <div class="employee-header">
           <div>
             <div class="employee-name">${emp.name}</div>
-            <div class="employee-meta">ID: ${emp.id} | 📧 ${emp.email} | 📱 ${emp.phone}</div>
+            <div class="employee-meta">ID: ${emp.id} | 📧 ${emp.email} | 📱 ${emp.phone} | 💰 Tarifa: ${formatCurrency(hourlyRate)}/hora</div>
           </div>
           <div style="text-align: right;">
             <div style="font-size: 14px; font-weight: 700; color: #10b981;">
@@ -438,10 +483,13 @@ function generatePersonalSectionHTML(
     `;
   });
 
+  // Obtener tarifa por hora del empleado
+  const hourlyRate = employee.hourlyRate || 0;
+  
   return `
     <h2 class="section-title">Reporte Personal: ${employee.name}</h2>
     <p style="color: #6b7280; margin-bottom: 20px; font-size: 14px;">
-      ID: ${employee.id} | 📧 ${employee.email} | 📱 ${employee.phone}
+      ID: ${employee.id} | 📧 ${employee.email} | 📱 ${employee.phone} | 💰 Tarifa: ${formatCurrency(hourlyRate)}/hora
     </p>
 
     <div class="summary-grid">

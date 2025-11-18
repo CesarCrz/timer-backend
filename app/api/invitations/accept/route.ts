@@ -80,16 +80,29 @@ export async function POST(request: Request) {
       throw new ValidationError('Employee not found');
     }
 
-    // Obtener branch_ids de la invitación (guardados como JSONB)
+    // Obtener branch_ids y branch_hours de la invitación (guardados como JSONB)
     const branchIds = invitation.branch_ids || [];
+    const branchHours = invitation.branch_hours || {};
     
     // Crear las relaciones employee_branches solo cuando acepta la invitación
     if (branchIds.length > 0) {
-      const rows = branchIds.map((bid: string) => ({ 
-        employee_id: employee.id, 
-        branch_id: bid, 
-        status: 'active' 
-      }));
+      const rows = branchIds.map((bid: string) => {
+        const hours = branchHours[bid] || {};
+        const row: any = { 
+          employee_id: employee.id, 
+          branch_id: bid, 
+          status: 'active' 
+        };
+        
+        // Aplicar horarios específicos si están presentes
+        if (hours.start && hours.end) {
+          row.employees_hours_start = hours.start;
+          row.employees_hours_end = hours.end;
+          row.tolerance_minutes = hours.tolerance || 0;
+        }
+        
+        return row;
+      });
       
       const { error: branchError } = await supabase
         .from('employee_branches')

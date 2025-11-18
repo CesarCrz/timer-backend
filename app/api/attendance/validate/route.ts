@@ -85,15 +85,27 @@ export async function POST(request: Request) {
       }
     }
 
-    // 3) Fetch active assigned branches
+    // 3) Fetch active assigned branches with employee-specific hours
     const { data: employeeBranches } = await supabase
       .from('employee_branches')
-      .select('branch_id, status')
+      .select('branch_id, status, employees_hours_start, employees_hours_end, tolerance_minutes')
       .eq('employee_id', employee.id);
 
     const activeBranchIds = (employeeBranches || [])
       .filter((eb: any) => eb.status === 'active')
       .map((eb: any) => eb.branch_id);
+    
+    // Crear mapa de horarios por branch_id para acceso rápido
+    const branchHoursMap = new Map<string, { start: string; end: string; tolerance: number }>();
+    (employeeBranches || []).forEach((eb: any) => {
+      if (eb.status === 'active' && eb.employees_hours_start && eb.employees_hours_end) {
+        branchHoursMap.set(eb.branch_id, {
+          start: eb.employees_hours_start,
+          end: eb.employees_hours_end,
+          tolerance: eb.tolerance_minutes || 0,
+        });
+      }
+    });
 
     if (activeBranchIds.length === 0) {
       return withCors(origin, Response.json({ valid: false, message: 'No tienes sucursales activas asignadas' }));
@@ -159,19 +171,39 @@ export async function POST(request: Request) {
       console.log('========================');
       
       // Calcular is_late según tolerancia
+      // PRIORIDAD: Usar horario del empleado en esta sucursal (employee_branches) si existe, sino usar horario de la sucursal
       let isLate = false;
-      if (closest.branch.business_hours_start && closest.branch.tolerance_minutes !== null) {
-        const [startHour, startMinute] = closest.branch.business_hours_start.split(':');
-        const scheduledStart = nowInBranchTZ
+      let scheduledStart: dayjs.Dayjs | null = null;
+      let toleranceMinutes = 0;
+      
+      // Verificar si el empleado tiene horario específico para esta sucursal
+      const employeeBranchHours = branchHoursMap.get(closest.branch.id);
+      if (employeeBranchHours) {
+        // Usar horario específico del empleado para esta sucursal
+        const [startHour, startMinute] = employeeBranchHours.start.split(':');
+        scheduledStart = nowInBranchTZ
           .clone()
           .hour(parseInt(startHour))
           .minute(parseInt(startMinute))
           .second(0)
           .millisecond(0);
         
-        const toleranceMinutes = closest.branch.tolerance_minutes || 0;
-        const allowedStart = scheduledStart.add(toleranceMinutes, 'minute');
+        toleranceMinutes = employeeBranchHours.tolerance;
+      } else if (closest.branch.business_hours_start) {
+        // Usar horario de la sucursal
+        const [startHour, startMinute] = closest.branch.business_hours_start.split(':');
+        scheduledStart = nowInBranchTZ
+          .clone()
+          .hour(parseInt(startHour))
+          .minute(parseInt(startMinute))
+          .second(0)
+          .millisecond(0);
         
+        toleranceMinutes = closest.branch.tolerance_minutes || 0;
+      }
+      
+      if (scheduledStart) {
+        const allowedStart = scheduledStart.add(toleranceMinutes, 'minute');
         // Si el check-in es después de la hora permitida (apertura + tolerancia), es tarde
         isLate = nowInBranchTZ.isAfter(allowedStart);
       }

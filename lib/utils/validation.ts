@@ -17,6 +17,10 @@ export const timeSchema = z
   .string()
   .regex(/^\d{2}:\d{2}:\d{2}$/u, 'Invalid time format (HH:MM:SS)');
 
+export const timeHHMMSchema = z
+  .string()
+  .regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/, 'Invalid time format (HH:MM)');
+
 export const dateRangeSchema = z
   .object({
     start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),

@@ -28,8 +28,14 @@ interface TemplateMessageParams {
 /**
  * Envía un mensaje de plantilla usando la API de Meta
  * Esto permite enviar mensajes a usuarios que no han iniciado conversación
+ * 
+ * @param params - Parámetros del mensaje
+ * @param systemNumberCredentials - Credenciales opcionales del número del sistema (si no se proporcionan, usa las de .env)
  */
-export async function sendTemplateMessage(params: TemplateMessageParams): Promise<{ 
+export async function sendTemplateMessage(
+  params: TemplateMessageParams,
+  systemNumberCredentials?: { jwtToken: string; numberId: string }
+): Promise<{ 
   success: boolean; 
   messageId?: string; 
   error?: string;
@@ -37,11 +43,15 @@ export async function sendTemplateMessage(params: TemplateMessageParams): Promis
   errorType?: string;
   fullError?: any;
 }> {
-  if (!META_JWT_TOKEN || !META_NUMBER_ID) {
-    throw new Error('META_JWT_TOKEN y META_NUMBER_ID deben estar configurados en las variables de entorno');
+  // Usar credenciales del número asignado si se proporcionan, sino usar las de .env
+  const jwtToken = systemNumberCredentials?.jwtToken || META_JWT_TOKEN;
+  const numberId = systemNumberCredentials?.numberId || META_NUMBER_ID;
+  
+  if (!jwtToken || !numberId) {
+    throw new Error('META_JWT_TOKEN y META_NUMBER_ID deben estar configurados en las variables de entorno o en systemNumberCredentials');
   }
 
-  const url = `https://graph.facebook.com/${META_API_VERSION}/${META_NUMBER_ID}/messages`;
+  const url = `https://graph.facebook.com/${META_API_VERSION}/${numberId}/messages`;
 
   const payload = {
     messaging_product: 'whatsapp',
@@ -66,7 +76,7 @@ export async function sendTemplateMessage(params: TemplateMessageParams): Promis
     
     const response = await axios.post(url, payload, {
       headers: {
-        'Authorization': `Bearer ${META_JWT_TOKEN}`,
+        'Authorization': `Bearer ${jwtToken}`,
         'Content-Type': 'application/json',
       },
       timeout: 10000,
@@ -107,15 +117,21 @@ export async function sendTemplateMessage(params: TemplateMessageParams): Promis
 
 /**
  * Envía una invitación de empleado usando plantilla de Meta
+ * 
+ * @param params - Parámetros de la invitación
+ * @param systemNumberCredentials - Credenciales opcionales del número del sistema asignado al empleado
  */
-export async function sendEmployeeInvitation(params: {
-  phone: string; // Formato E.164 (ej: +5213326232840)
-  employeeName: string;
-  businessName: string;
-  branches: string[]; // Nombres de sucursales
-  invitationUrl: string; // URL del link de invitación
-  templateName?: string; // Nombre de la plantilla (default: 'employee_invitation')
-}): Promise<{ success: boolean; messageId?: string; error?: string; errorCode?: number; errorType?: string; fullError?: any }> {
+export async function sendEmployeeInvitation(
+  params: {
+    phone: string; // Formato E.164 (ej: +5213326232840)
+    employeeName: string;
+    businessName: string;
+    branches: string[]; // Nombres de sucursales
+    invitationUrl: string; // URL del link de invitación
+    templateName?: string; // Nombre de la plantilla (default: 'employee_invitation')
+  },
+  systemNumberCredentials?: { jwtToken: string; numberId: string }
+): Promise<{ success: boolean; messageId?: string; error?: string; errorCode?: number; errorType?: string; fullError?: any }> {
   const templateName = params.templateName || 'employee_invitation';
   
   // Construir el texto de sucursales
@@ -213,6 +229,6 @@ export async function sendEmployeeInvitation(params: {
     templateName,
     languageCode: 'en',
     components,
-  });
+  }, systemNumberCredentials);
 }
 

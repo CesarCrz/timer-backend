@@ -45,10 +45,10 @@ export async function GET(request: NextRequest) {
       }
 
       // Obtener lote de registros activos
-      // Incluir employee_id para detectar duplicados
+      // Incluir employee_id y branch_id para obtener horarios de employee_branches
       const { data: activeRecords, error: recordsError } = await supabase
         .from('attendance_records')
-        .select('id, employee_id, check_in_time, branch:branches(id, business_hours_start, business_hours_end, timezone, status)')
+        .select('id, employee_id, branch_id, check_in_time, is_auto_closed, branch:branches(id, business_hours_start, business_hours_end, timezone, status)')
         .eq('status', 'active')
         .order('check_in_time', { ascending: true })
         .range(offset, offset + BATCH_SIZE - 1);
@@ -98,21 +98,42 @@ export async function GET(request: NextRequest) {
             continue;
           }
 
-          // VALIDACIÓN 3: Verificar que tenga business_hours configurado
+          // VALIDACIÓN 3: Obtener horario (prioridad: employee_branches > sucursal)
           const branchTimezone = branch?.timezone || 'America/Mexico_City';
-          const businessHoursStart = branch?.business_hours_start;
-          const businessHoursEnd = branch?.business_hours_end;
           
-          if (!businessHoursEnd || !businessHoursStart) {
-            console.warn(`⚠️ [AUTO-CHECKOUT] Registro ${record.id} no tiene business_hours configurado, saltando...`);
+          // Obtener horario específico del empleado para esta sucursal desde employee_branches
+          const { data: employeeBranch } = await supabase
+            .from('employee_branches')
+            .select('employees_hours_start, employees_hours_end')
+            .eq('employee_id', record.employee_id)
+            .eq('branch_id', record.branch_id)
+            .eq('status', 'active')
+            .maybeSingle();
+          
+          // PRIORIDAD: Usar horario del empleado en esta sucursal si existe, sino usar horario de la sucursal
+          let hoursStart: string | null = null;
+          let hoursEnd: string | null = null;
+          
+          if (employeeBranch?.employees_hours_start && employeeBranch?.employees_hours_end) {
+            // Usar horario específico del empleado para esta sucursal
+            hoursStart = employeeBranch.employees_hours_start;
+            hoursEnd = employeeBranch.employees_hours_end;
+          } else if (branch?.business_hours_start && branch?.business_hours_end) {
+            // Usar horario de la sucursal
+            hoursStart = branch.business_hours_start;
+            hoursEnd = branch.business_hours_end;
+          }
+          
+          if (!hoursEnd || !hoursStart) {
+            console.warn(`⚠️ [AUTO-CHECKOUT] Registro ${record.id} no tiene horario configurado (ni empleado ni sucursal), saltando...`);
             skippedCount++;
-            errors.push(`Registro ${record.id}: Business hours no configurado`);
+            errors.push(`Registro ${record.id}: Horario no configurado`);
             continue;
           }
 
           // VALIDACIÓN 4: Verificar formato de horas
-          const hoursStartMatch = businessHoursStart.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-          const hoursEndMatch = businessHoursEnd.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+          const hoursStartMatch = hoursStart.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+          const hoursEndMatch = hoursEnd.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
           
           if (!hoursStartMatch || !hoursEndMatch) {
             console.warn(`⚠️ [AUTO-CHECKOUT] Registro ${record.id} tiene formato de horas inválido, saltando...`);
@@ -135,7 +156,7 @@ export async function GET(request: NextRequest) {
           // Obtener la hora actual en el timezone de la sucursal
           const nowInBranchTZ = nowUTC.tz(branchTimezone);
           
-          // Parsear horas de inicio y fin
+          // Parsear horas de inicio y fin (usando el horario determinado arriba)
           const startHour = parseInt(hoursStartMatch[1]);
           const startMinute = parseInt(hoursStartMatch[2]);
           const endHour = parseInt(hoursEndMatch[1]);
@@ -229,11 +250,13 @@ export async function GET(request: NextRequest) {
             updates.push({
               id: record.id,
               checkOutTime: fallbackCheckOut.format('YYYY-MM-DD HH:mm:ss'),
+              isAutoClosed: true,
             });
           } else {
             updates.push({
               id: record.id,
               checkOutTime: autoCheckOutUTC.format('YYYY-MM-DD HH:mm:ss'),
+              isAutoClosed: true, // Marcar que fue cerrado automáticamente
             });
           }
           
@@ -248,7 +271,7 @@ export async function GET(request: NextRequest) {
       // Ejecutar actualizaciones en lotes para mejor rendimiento
       if (updates.length > 0) {
         // Procesar en lotes más pequeños para evitar timeouts
-        const updateBatches: Array<Array<{ id: string; checkOutTime: string }>> = [];
+        const updateBatches: Array<Array<{ id: string; checkOutTime: string; isAutoClosed?: boolean }>> = [];
         for (let i = 0; i < updates.length; i += 20) {
           updateBatches.push(updates.slice(i, i + 20));
         }
@@ -256,13 +279,13 @@ export async function GET(request: NextRequest) {
         for (const batch of updateBatches) {
           try {
             // Usar transacción implícita con Promise.all para mejor rendimiento
-            const batchUpdates = batch.map(({ id, checkOutTime }) =>
+            const batchUpdates = batch.map(({ id, checkOutTime, isAutoClosed }) =>
               supabase
                 .from('attendance_records')
                 .update({ 
                   check_out_time: checkOutTime, 
                   status: 'completed', 
-                  is_auto_closed: true,
+                  is_auto_closed: isAutoClosed !== undefined ? isAutoClosed : true, // Siempre marcar como auto-closed
                   updated_at: new Date().toISOString(),
                 })
                 .eq('id', id)

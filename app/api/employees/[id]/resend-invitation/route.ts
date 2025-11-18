@@ -1,6 +1,7 @@
 import { withCors, preflight } from '@/lib/utils/cors';
 import { createServiceRoleClient, getCurrentUser, getUserBusinessId } from '@/lib/utils/auth';
 import { handleApiError, NotFoundError } from '@/lib/utils/errors';
+import { getSystemNumberCredentials } from '@/lib/utils/system-numbers';
 
 export async function OPTIONS(request: Request) {
   const origin = request.headers.get('origin');
@@ -18,7 +19,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
 
     const { data: employee } = await supabase
       .from('employees')
-      .select('id, business_id, full_name, phone')
+      .select('id, business_id, full_name, phone, system_number_registered')
       .eq('id', employeeId)
       .single();
     if (!employee || employee.business_id !== businessId) throw new NotFoundError('Employee');
@@ -73,12 +74,25 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
 
       const invitationUrl = `${process.env.FRONTEND_URL}/invite/${token}`;
       
+      // Obtener credenciales del número asignado si existe
+      let systemNumberCredentials: { jwtToken: string; numberId: string } | undefined;
+      if (employee.system_number_registered) {
+        const systemNumber = await getSystemNumberCredentials(employee.system_number_registered);
+        if (systemNumber) {
+          systemNumberCredentials = {
+            jwtToken: systemNumber.meta_jwt_token,
+            numberId: systemNumber.meta_number_id,
+          };
+        }
+      }
+      
       // Usar la función sendEmployeeInvitation que maneja mejor los errores y usa la API de Meta
       const { sendEmployeeInvitation } = await import('@/lib/meta/template-messages');
       
       console.log(`📤 [RESEND] Intentando reenviar invitación a ${employee.full_name} (${employee.phone})`);
       console.log(`📋 [RESEND] URL de invitación: ${invitationUrl}`);
       console.log(`📋 [RESEND] Sucursales: ${(branches || []).map((b: any) => b.name).filter(Boolean).join(', ')}`);
+      console.log(`📱 [RESEND] Número asignado: ${employee.system_number_registered || 'N/A'}`);
       
       const result = await sendEmployeeInvitation({
         phone: employee.phone,
@@ -87,7 +101,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
         branches: (branches || []).map((b: any) => b.name),
         invitationUrl,
         templateName: 'employee_invitation',
-      });
+      }, systemNumberCredentials);
 
       if (!result.success) {
         console.error(`❌ [RESEND] Error al reenviar invitación por WhatsApp`);

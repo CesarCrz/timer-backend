@@ -3,12 +3,29 @@ import { withCors, preflight } from '@/lib/utils/cors';
 import { createServiceRoleClient, getCurrentUser, getUserBusinessId } from '@/lib/utils/auth';
 import { handleApiError, PlanLimitError } from '@/lib/utils/errors';
 import { validatePlanLimits } from '@/lib/utils/validation';
+import { assignSystemNumberToEmployee, getSystemNumberCredentials } from '@/lib/utils/system-numbers';
 
 const employeeSchema = z.object({
   full_name: z.string().min(3).max(100),
   phone: z.string().regex(/^\+[1-9]\d{1,14}$/),
-  hourly_rate: z.number().positive().max(10000),
+  hourly_rate: z.number().min(1).max(10000), // Changed from positive() to min(1)
   branch_ids: z.array(z.string().uuid()).min(1),
+  // Premium features: horarios por sucursal
+  // branch_hours: { [branchId]: { start: string, end: string, tolerance: number } }
+  branch_hours: z.record(
+    z.string().uuid(),
+    z.object({
+      start: z.union([
+        z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/),
+        z.literal(''),
+      ]).optional(),
+      end: z.union([
+        z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/),
+        z.literal(''),
+      ]).optional(),
+      tolerance: z.number().min(0).max(59).optional(),
+    })
+  ).optional(),
 });
 
 export async function OPTIONS(request: Request) {
@@ -23,13 +40,16 @@ export async function GET(request: Request) {
     const businessId = await getUserBusinessId(user.id);
     const supabase = createServiceRoleClient();
     
-    // Obtener empleados con sus branches (usando left join para incluir empleados sin branches)
+    // Obtener empleados con sus branches y horarios (usando left join para incluir empleados sin branches)
     const { data: employees } = await supabase
       .from('employees')
       .select(`
         *,
         employee_branches(
-          branch:branches(id, name)
+          branch:branches(id, name),
+          employees_hours_start,
+          employees_hours_end,
+          tolerance_minutes
         )
       `)
       .eq('business_id', businessId)
@@ -42,6 +62,9 @@ export async function GET(request: Request) {
         .map((eb: any) => ({
           id: eb.branch?.id,
           name: eb.branch?.name,
+          employees_hours_start: eb.employees_hours_start,
+          employees_hours_end: eb.employees_hours_end,
+          tolerance_minutes: eb.tolerance_minutes,
         }))
         .filter((b: any) => b.id && b.name),
     }));
@@ -114,15 +137,90 @@ export async function POST(request: Request) {
     const limits = await validatePlanLimits(supabase, businessId, 'employees');
     if (!limits.allowed) throw new PlanLimitError('employees', limits.current, limits.max);
 
+    // Check if user has premium subscription (not basic)
+    const { data: subscription } = await supabase
+      .from('user_subscriptions')
+      .select('tier:subscription_tiers(name)')
+      .eq('business_id', businessId)
+      .eq('status', 'active')
+      .single();
+
+    const tierName = subscription?.tier && !Array.isArray(subscription.tier) 
+      ? subscription.tier.name 
+      : null;
+    const isPremium = tierName !== null && tierName !== 'Básico';
+
+    // Validate premium features: branch_hours
+    if (!isPremium && payload.branch_hours && Object.keys(payload.branch_hours).length > 0) {
+      return withCors(origin, Response.json(
+        {
+          error: 'Premium feature required',
+          code: 'PREMIUM_REQUIRED',
+          message: 'Los horarios específicos por sucursal están disponibles solo para planes Premium. Actualiza tu plan para utilizar esta característica.',
+        },
+        { status: 403 }
+      ));
+    }
+
+    // Validate branch_hours if provided
+    if (isPremium && payload.branch_hours) {
+      for (const [branchId, hours] of Object.entries(payload.branch_hours)) {
+        const h = hours as { start?: string; end?: string; tolerance?: number };
+        // Si se proporciona start o end, ambos deben estar presentes
+        if ((h.start && !h.end) || (!h.start && h.end)) {
+          return withCors(origin, Response.json(
+            {
+              error: 'Validation error',
+              code: 'VALIDATION_ERROR',
+              message: `Para la sucursal ${branchId}, si especificas un horario, debes proporcionar tanto la hora de inicio como la de fin.`,
+            },
+            { status: 400 }
+          ));
+        }
+        
+        // Si ambos están presentes, validar que start < end
+        if (h.start && h.end) {
+          const [startHour, startMin] = h.start.split(':').map(Number);
+          const [endHour, endMin] = h.end.split(':').map(Number);
+          const startMinutes = startHour * 60 + startMin;
+          const endMinutes = endHour * 60 + endMin;
+
+          if (startMinutes >= endMinutes) {
+            return withCors(origin, Response.json(
+              {
+                error: 'Validation error',
+                code: 'VALIDATION_ERROR',
+                message: `Para la sucursal ${branchId}, la hora de inicio debe ser menor que la hora de fin.`,
+              },
+              { status: 400 }
+            ));
+          }
+        }
+      }
+    }
+
+    // Assign system number
+    const assignedSystemNumber = await assignSystemNumberToEmployee();
+
+    // Prepare employee data
+    const employeeData: any = {
+      business_id: businessId,
+      full_name: payload.full_name,
+      phone: payload.phone,
+      hourly_rate: payload.hourly_rate,
+      status: 'pending',
+    };
+
+    // Add system number if assigned
+    if (assignedSystemNumber) {
+      employeeData.system_number_registered = assignedSystemNumber;
+    }
+
+    // branch_hours se guardará en employee_invitations, no en employees
+
     const { data: employee, error: insertError } = await supabase
       .from('employees')
-      .insert({
-        business_id: businessId,
-        full_name: payload.full_name,
-        phone: payload.phone,
-        hourly_rate: payload.hourly_rate,
-        status: 'pending',
-      })
+      .insert(employeeData)
       .select()
       .single();
 
@@ -146,13 +244,20 @@ export async function POST(request: Request) {
 
     const token = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    // Guardar branch_ids en el invitation como JSONB para crear las relaciones cuando acepte
-    await supabase.from('employee_invitations').insert({ 
+    // Guardar branch_ids y branch_hours en el invitation como JSONB para crear las relaciones cuando acepte
+    const invitationData: any = {
       employee_id: employee.id, 
       token, 
       expires_at: expiresAt,
-      branch_ids: payload.branch_ids || [] // Guardar como JSONB
-    });
+      branch_ids: payload.branch_ids || [], // Guardar como JSONB
+    };
+    
+    // Guardar branch_hours si es premium y están presentes
+    if (isPremium && payload.branch_hours && Object.keys(payload.branch_hours).length > 0) {
+      invitationData.branch_hours = payload.branch_hours;
+    }
+    
+    await supabase.from('employee_invitations').insert(invitationData);
 
     // Send WhatsApp invitation via Meta Template Message API
     try {
@@ -171,6 +276,18 @@ export async function POST(request: Request) {
       // Usamos formato: /invite/{token} donde el token es único y contiene toda la info necesaria
       const invitationUrl = `${process.env.FRONTEND_URL}/invite/${token}`;
       
+      // Obtener credenciales del número asignado si existe
+      let systemNumberCredentials: { jwtToken: string; numberId: string } | undefined;
+      if (assignedSystemNumber) {
+        const systemNumber = await getSystemNumberCredentials(assignedSystemNumber);
+        if (systemNumber) {
+          systemNumberCredentials = {
+            jwtToken: systemNumber.meta_jwt_token,
+            numberId: systemNumber.meta_number_id,
+          };
+        }
+      }
+      
       // Importar función de envío de plantilla
       const { sendEmployeeInvitation } = await import('@/lib/meta/template-messages');
       
@@ -181,7 +298,7 @@ export async function POST(request: Request) {
         branches: (branches || []).map((b: any) => b.name),
         invitationUrl,
         templateName: 'employee_invitation', // Nombre de la plantilla en Meta
-      });
+      }, systemNumberCredentials);
 
       if (!result.success) {
         console.error('Error al enviar invitación por WhatsApp:', result.error);
@@ -203,6 +320,7 @@ export async function POST(request: Request) {
       branches: branchesData,
       invitation_sent: true,
       invitation_link: invitationLink,
+      system_number: assignedSystemNumber, // Include assigned system number in response
     }));
   } catch (error) {
     return handleApiError(error);

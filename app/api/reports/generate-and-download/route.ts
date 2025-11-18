@@ -55,6 +55,8 @@ export async function POST(request: Request) {
       .select('*, employee:employees(full_name, hourly_rate, phone), branch:branches(name, business_hours_start, business_hours_end, timezone, address, tolerance_minutes)')
       .eq('status', 'completed')
       .not('check_out_time', 'is', null);
+    // Note: is_auto_closed is already included in the * selector
+    // Horarios de employee_branches se obtendrán después
     
     // Filtrar por business_id a través de employees
     const { data: businessEmployees } = await supabase
@@ -103,8 +105,29 @@ export async function POST(request: Request) {
       }, { status: 404 }));
     }
 
+    // Obtener horarios de employee_branches para cada registro
+    const recordsWithHours = await Promise.all((records || []).map(async (rec: any) => {
+      const { data: employeeBranch } = await supabase
+        .from('employee_branches')
+        .select('employees_hours_start, employees_hours_end, tolerance_minutes')
+        .eq('employee_id', rec.employee_id)
+        .eq('branch_id', rec.branch_id)
+        .eq('status', 'active')
+        .maybeSingle();
+      
+      return {
+        ...rec,
+        employee: {
+          ...rec.employee,
+          employees_hours_start: employeeBranch?.employees_hours_start || null,
+          employees_hours_end: employeeBranch?.employees_hours_end || null,
+          tolerance_minutes: employeeBranch?.tolerance_minutes || null,
+        },
+      };
+    }));
+
     const byEmployee: Record<string, any> = {};
-    (records || []).forEach((rec: any) => {
+    recordsWithHours.forEach((rec: any) => {
       const key = rec.employee_id;
       if (!byEmployee[key]) byEmployee[key] = { employee: rec.employee, records: [] };
       byEmployee[key].records.push(rec);

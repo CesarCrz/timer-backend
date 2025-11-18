@@ -28,9 +28,10 @@ export async function POST(request: Request) {
     const supabase = createServiceRoleClient();
 
     // Fetch completed records for date range and optional branches
+    // Incluir horarios de employee_branches para cada registro
     let query = supabase
       .from('attendance_records')
-      .select('*, employee:employees(full_name, hourly_rate), branch:branches(name, business_hours_start, timezone)')
+      .select('*, employee:employees(full_name, hourly_rate), branch:branches(name, business_hours_start, business_hours_end, timezone, address, tolerance_minutes)')
       .eq('status', 'completed');
 
     if (params.branch_ids && params.branch_ids.length) query = query.in('branch_id', params.branch_ids);
@@ -38,8 +39,29 @@ export async function POST(request: Request) {
 
     const { data: records } = await query.order('check_in_time', { ascending: true });
 
+    // Obtener horarios de employee_branches para cada registro
+    const recordsWithHours = await Promise.all((records || []).map(async (rec: any) => {
+      const { data: employeeBranch } = await supabase
+        .from('employee_branches')
+        .select('employees_hours_start, employees_hours_end, tolerance_minutes')
+        .eq('employee_id', rec.employee_id)
+        .eq('branch_id', rec.branch_id)
+        .eq('status', 'active')
+        .maybeSingle();
+      
+      return {
+        ...rec,
+        employee: {
+          ...rec.employee,
+          employees_hours_start: employeeBranch?.employees_hours_start || null,
+          employees_hours_end: employeeBranch?.employees_hours_end || null,
+          tolerance_minutes: employeeBranch?.tolerance_minutes || null,
+        },
+      };
+    }));
+
     const byEmployee: Record<string, any> = {};
-    (records || []).forEach((rec: any) => {
+    recordsWithHours.forEach((rec: any) => {
       const key = rec.employee_id;
       if (!byEmployee[key]) byEmployee[key] = { employee: rec.employee, records: [] };
       byEmployee[key].records.push(rec);
