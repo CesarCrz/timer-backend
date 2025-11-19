@@ -15,14 +15,22 @@ const employeeSchema = z.object({
   branch_hours: z.record(
     z.string().uuid(),
     z.object({
-      start: z.union([
-        z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/),
-        z.literal(''),
-      ]).optional(),
-      end: z.union([
-        z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/),
-        z.literal(''),
-      ]).optional(),
+      start: z.preprocess(
+        (val) => {
+          if (!val || typeof val !== 'string') return undefined;
+          const trimmed = val.trim();
+          return trimmed === '' ? undefined : trimmed;
+        },
+        z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/).optional()
+      ),
+      end: z.preprocess(
+        (val) => {
+          if (!val || typeof val !== 'string') return undefined;
+          const trimmed = val.trim();
+          return trimmed === '' ? undefined : trimmed;
+        },
+        z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/).optional()
+      ),
       tolerance: z.number().min(0).max(59).optional(),
     })
   ).optional(),
