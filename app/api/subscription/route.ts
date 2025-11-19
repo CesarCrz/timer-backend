@@ -35,8 +35,8 @@ export async function GET(request: Request) {
     }
 
     // Type guard: asegurar que tier es un objeto, no un array
-    const tier = Array.isArray(subscription.tier) ? subscription.tier[0] : subscription.tier;
-    if (!tier) {
+    const tier = Array.isArray(subscription.tier) ? subscription.tier[0] : (subscription.tier as { id: string; name: string; price_monthly_mxn: number; price_yearly_mxn: number; max_branches: number; max_employees: number } | null);
+    if (!tier || !tier.id) {
       return withCors(origin, Response.json({
         current_tier: null,
         current_usage: {

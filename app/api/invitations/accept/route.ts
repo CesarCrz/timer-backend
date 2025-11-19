@@ -44,61 +44,128 @@ function cleanToken(token: string): string {
 export async function POST(request: Request) {
   try {
     const origin = request.headers.get('origin');
-    const body = await request.json();
+    let body: any;
+    
+    try {
+      body = await request.json();
+    } catch (error) {
+      console.error('❌ [ACCEPT] Error parsing request body:', error);
+      throw new ValidationError('Invalid request body');
+    }
     
     // Procesar el token ANTES de validarlo con Zod
-    const rawToken = body.token;
-    if (!rawToken) throw new ValidationError('Token is required');
+    const rawToken = body?.token;
+    if (!rawToken || typeof rawToken !== 'string') {
+      throw new ValidationError('Token is required');
+    }
     
     const cleanedToken = cleanToken(rawToken);
     console.log(`🔍 [ACCEPT] Token recibido: ${rawToken}`);
     console.log(`🔍 [ACCEPT] Token procesado: ${cleanedToken}`);
     
-    // Validar que el token limpiado sea un UUID válido
-    const { token } = acceptSchema.parse({ token: cleanedToken, terms_accepted: body.terms_accepted });
+    // Validar que el token limpiado sea un UUID válido y terms_accepted sea true
+    if (body.terms_accepted !== true) {
+      throw new ValidationError('Terms must be accepted');
+    }
+    
+    let token: string;
+    try {
+      const parsed = acceptSchema.parse({ token: cleanedToken, terms_accepted: body.terms_accepted });
+      token = parsed.token;
+    } catch (zodError: any) {
+      console.error('❌ [ACCEPT] Zod validation error:', zodError);
+      throw new ValidationError(zodError.errors?.[0]?.message || 'Invalid token format');
+    }
 
     const supabase = createServiceRoleClient();
     const nowIso = new Date().toISOString();
 
-    const { data: invitation } = await supabase
+    const { data: invitation, error: invitationError } = await supabase
       .from('employee_invitations')
       .select('*')
       .eq('token', token)
       .single();
 
-    if (!invitation) throw new ValidationError('Invalid token');
-    if (invitation.status !== 'pending') throw new ValidationError('Token not pending');
-    if (invitation.expires_at <= nowIso) throw new ValidationError('Token expired');
+    if (invitationError || !invitation) {
+      console.error('❌ [ACCEPT] Invitation not found:', invitationError);
+      throw new ValidationError('Invalid token');
+    }
+    
+    if (invitation.status !== 'pending') {
+      console.warn(`⚠️ [ACCEPT] Token status is not pending: ${invitation.status}`);
+      throw new ValidationError('Token not pending');
+    }
+    
+    if (invitation.expires_at <= nowIso) {
+      console.warn(`⚠️ [ACCEPT] Token expired: ${invitation.expires_at} <= ${nowIso}`);
+      throw new ValidationError('Token expired');
+    }
 
-    const { data: employee } = await supabase
+    const { data: employee, error: employeeError } = await supabase
       .from('employees')
       .select('id')
       .eq('id', invitation.employee_id)
       .single();
 
-    if (!employee) {
+    if (employeeError || !employee) {
+      console.error('❌ [ACCEPT] Employee not found:', employeeError);
       throw new ValidationError('Employee not found');
     }
 
     // Obtener branch_ids y branch_hours de la invitación (guardados como JSONB)
-    const branchIds = invitation.branch_ids || [];
-    const branchHours = invitation.branch_hours || {};
+    // Validar y normalizar los tipos para evitar errores de TypeScript
+    let branchIds: string[] = [];
+    if (invitation.branch_ids) {
+      if (Array.isArray(invitation.branch_ids)) {
+        branchIds = invitation.branch_ids.filter((id: any) => typeof id === 'string' && id.length > 0);
+      } else if (typeof invitation.branch_ids === 'string') {
+        // Si es un string, intentar parsearlo como JSON
+        try {
+          const parsed = JSON.parse(invitation.branch_ids);
+          if (Array.isArray(parsed)) {
+            branchIds = parsed.filter((id: any) => typeof id === 'string' && id.length > 0);
+          }
+        } catch (e) {
+          console.warn('Error parsing branch_ids as JSON:', e);
+        }
+      }
+    }
+    
+    let branchHours: Record<string, { start?: string; end?: string; tolerance?: number }> = {};
+    if (invitation.branch_hours) {
+      if (typeof invitation.branch_hours === 'object' && invitation.branch_hours !== null) {
+        branchHours = invitation.branch_hours as Record<string, { start?: string; end?: string; tolerance?: number }>;
+      } else if (typeof invitation.branch_hours === 'string') {
+        try {
+          branchHours = JSON.parse(invitation.branch_hours);
+        } catch (e) {
+          console.warn('Error parsing branch_hours as JSON:', e);
+        }
+      }
+    }
     
     // Crear las relaciones employee_branches solo cuando acepta la invitación
     if (branchIds.length > 0) {
       const rows = branchIds.map((bid: string) => {
         const hours = branchHours[bid] || {};
-        const row: any = { 
+        const row: { 
+          employee_id: string; 
+          branch_id: string; 
+          status: string;
+          employees_hours_start?: string;
+          employees_hours_end?: string;
+          tolerance_minutes?: number;
+        } = { 
           employee_id: employee.id, 
           branch_id: bid, 
           status: 'active' 
         };
         
         // Aplicar horarios específicos si están presentes
-        if (hours.start && hours.end) {
-          row.employees_hours_start = hours.start;
-          row.employees_hours_end = hours.end;
-          row.tolerance_minutes = hours.tolerance || 0;
+        if (hours && typeof hours === 'object' && hours.start && hours.end) {
+          row.employees_hours_start = String(hours.start);
+          row.employees_hours_end = String(hours.end);
+          row.tolerance_minutes = typeof hours.tolerance === 'number' ? hours.tolerance : 0;
         }
         
         return row;
@@ -109,22 +176,45 @@ export async function POST(request: Request) {
         .insert(rows);
       
       if (branchError) {
-        console.error('Error inserting employee_branches:', branchError);
-        throw new Error(branchError.message || 'Error al asignar sucursales');
+        console.error('❌ [ACCEPT] Error inserting employee_branches:', branchError);
+        throw new ValidationError(branchError.message || 'Error al asignar sucursales', { 
+          code: 'BRANCH_ASSIGNMENT_ERROR',
+          details: branchError 
+        });
       }
     }
 
-    await supabase
+    // Actualizar estado del empleado
+    const { error: updateEmployeeError } = await supabase
       .from('employees')
       .update({ status: 'active', terms_accepted_at: nowIso })
       .eq('id', employee.id);
 
-    await supabase
+    if (updateEmployeeError) {
+      console.error('❌ [ACCEPT] Error updating employee:', updateEmployeeError);
+      throw new ValidationError('Error al actualizar empleado', { 
+        code: 'EMPLOYEE_UPDATE_ERROR',
+        details: updateEmployeeError 
+      });
+    }
+
+    // Actualizar estado de la invitación
+    const { error: updateInvitationError } = await supabase
       .from('employee_invitations')
       .update({ status: 'accepted' })
       .eq('id', invitation.id);
 
-    return withCors(origin, Response.json({ message: 'Invitation accepted successfully', employee_id: employee.id }));
+    if (updateInvitationError) {
+      console.error('❌ [ACCEPT] Error updating invitation:', updateInvitationError);
+      // No lanzar error aquí porque el empleado ya fue actualizado
+      console.warn('⚠️ [ACCEPT] Employee updated but invitation status update failed');
+    }
+
+    console.log(`✅ [ACCEPT] Invitation accepted successfully for employee ${employee.id}`);
+    return withCors(origin, Response.json({ 
+      message: 'Invitation accepted successfully', 
+      employee_id: employee.id 
+    }));
   } catch (error) {
     return handleApiError(error);
   }

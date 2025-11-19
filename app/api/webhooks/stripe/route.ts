@@ -94,16 +94,20 @@ export async function POST(request: NextRequest) {
         // Enviar correo de confirmación solo si tenemos todos los datos necesarios
         if (business && tier && ownerEmail) {
           try {
+            // Type guard para tier
+            const tierData = tier as { name?: string; price_monthly_mxn?: number; max_employees?: number; max_branches?: number; features?: unknown } | null;
+            if (!tierData) return;
+            
             const renewalDate = dayjs(subscription.current_period_end * 1000).format('DD/MM/YYYY');
             const nextBillingDate = dayjs(subscription.current_period_end * 1000).format('DD/MM/YYYY');
-            const features = tier.features && Array.isArray(tier.features) ? tier.features : [];
+            const features = tierData.features && Array.isArray(tierData.features) ? tierData.features : [];
             
             const { subject, html } = renderTemplate('subscription-confirmed', {
-              planName: tier.name || 'Plan',
-              priceMxn: tier.price_monthly_mxn ? parseFloat(String(tier.price_monthly_mxn)).toFixed(2) : '0.00',
+              planName: tierData.name || 'Plan',
+              priceMxn: tierData.price_monthly_mxn ? parseFloat(String(tierData.price_monthly_mxn)).toFixed(2) : '0.00',
               renewalDate,
-              maxEmployees: tier.max_employees || 0,
-              maxBranches: tier.max_branches || 0,
+              maxEmployees: tierData.max_employees || 0,
+              maxBranches: tierData.max_branches || 0,
               features,
               nextBillingDate,
               dashboardUrl: `${process.env.FRONTEND_URL || 'https://timer.app'}/dashboard`,

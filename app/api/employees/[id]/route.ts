@@ -57,9 +57,11 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
       .eq('status', 'active')
       .single();
 
-    const tierName = subscription?.tier && !Array.isArray(subscription.tier) 
-      ? subscription.tier.name 
+    // Type guard para tier
+    const tier = subscription?.tier && !Array.isArray(subscription.tier) 
+      ? subscription.tier as { name: string }
       : null;
+    const tierName = tier?.name || null;
     const isPremium = tierName !== null && tierName !== 'Básico';
 
     // Validate premium features: branch_hours

@@ -48,7 +48,8 @@ export async function GET(request: Request) {
       }));
     }
 
-    const tier = Array.isArray(tierData) ? tierData[0] : tierData;
+    // Type guard: tierData ya no es array aquí, es un objeto
+    const tier = tierData as { name?: string; max_branches?: number; max_employees?: number } | null;
     if (!tier) {
       return withCors(origin, Response.json({
         has_subscription: false,
