@@ -41,24 +41,168 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { phone, latitude, longitude, action: providedAction } = bodySchema.parse(body);
 
+    console.log('🔍 [VALIDATE] ============================================');
+    console.log('🔍 [VALIDATE] Iniciando validación de asistencia');
+    console.log('🔍 [VALIDATE] Teléfono recibido:', phone);
+    console.log('🔍 [VALIDATE] Coordenadas recibidas:', { latitude, longitude });
+    console.log('🔍 [VALIDATE] Acción proporcionada:', providedAction || 'AUTO');
+
     const supabase = createServiceRoleClient();
 
-    // 1) Find active employee by phone
-    const { data: employee } = await supabase
+    // 1) Buscar TODOS los empleados activos con este teléfono (pueden ser de diferentes negocios)
+    console.log('🔍 [VALIDATE] Buscando TODOS los empleados activos con teléfono:', phone);
+    const { data: allEmployees, error: employeeError } = await supabase
       .from('employees')
-      .select('id, status')
+      .select('id, status, full_name, phone, business_id, created_at')
       .eq('phone', phone)
-      .eq('status', 'active')
-      .maybeSingle();
+      .eq('status', 'active');
 
-    if (!employee) {
+    if (employeeError) {
+      console.error('❌ [VALIDATE] Error al buscar empleados:', employeeError);
+    }
+
+    console.log('🔍 [VALIDATE] Empleados activos encontrados:', allEmployees?.length || 0);
+    if (allEmployees && allEmployees.length > 0) {
+      console.log('🔍 [VALIDATE] Detalle de empleados:', allEmployees.map((e: any) => ({
+        id: e.id,
+        name: e.full_name,
+        business_id: e.business_id,
+        created_at: e.created_at
+      })));
+    }
+
+    if (!allEmployees || allEmployees.length === 0) {
+      console.log('❌ [VALIDATE] ERROR: No se encontraron empleados activos con este teléfono');
       return withCors(origin, Response.json({ valid: false, message: 'Empleado no encontrado o inactivo' }));
     }
 
-    // 2) Determinar automáticamente la acción si no se proporciona
+    // 2) Para cada empleado, obtener TODAS sus sucursales activas (sin filtrar por radio todavía)
+    // Construir un array de todas las sucursales de todos los empleados
+    interface BranchCandidate {
+      employee: any;
+      branch: any;
+      employeeBranch: any;
+      distance: number;
+    }
+
+    const allBranchCandidates: BranchCandidate[] = [];
+
+    for (const employee of allEmployees) {
+      console.log(`🔍 [VALIDATE] Procesando empleado ${employee.full_name} (${employee.id})`);
+      
+      // Obtener sucursales asignadas activas para este empleado
+      const { data: employeeBranches, error: employeeBranchesError } = await supabase
+        .from('employee_branches')
+        .select('branch_id, status, employees_hours_start, employees_hours_end, tolerance_minutes')
+        .eq('employee_id', employee.id)
+        .eq('status', 'active');
+
+      if (employeeBranchesError) {
+        console.error(`❌ [VALIDATE] Error al buscar sucursales para empleado ${employee.id}:`, employeeBranchesError);
+        continue;
+      }
+
+      const activeBranchIds = (employeeBranches || [])
+        .filter((eb: any) => eb.status === 'active')
+        .map((eb: any) => eb.branch_id);
+
+      if (activeBranchIds.length === 0) {
+        console.log(`⚠️ [VALIDATE] Empleado ${employee.full_name} no tiene sucursales activas asignadas`);
+        continue;
+      }
+
+      // Obtener detalles de las sucursales activas
+      const { data: branches, error: branchesError } = await supabase
+        .from('branches')
+        .select('id, name, latitude, longitude, tolerance_radius_meters, timezone, business_hours_start, tolerance_minutes, status')
+        .in('id', activeBranchIds)
+        .eq('status', 'active');
+
+      if (branchesError) {
+        console.error(`❌ [VALIDATE] Error al buscar sucursales para empleado ${employee.id}:`, branchesError);
+        continue;
+      }
+
+      // Calcular distancia a cada sucursal (SIN filtrar por radio todavía)
+      (branches || []).forEach((branch: any) => {
+        const distance = calculateDistance(latitude, longitude, Number(branch.latitude), Number(branch.longitude));
+        
+        console.log(`🔍 [VALIDATE] Empleado ${employee.full_name} - Sucursal ${branch.name}: distancia=${distance.toFixed(2)}m, radio permitido=${branch.tolerance_radius_meters}m`);
+        
+        // Encontrar el employee_branch correspondiente para obtener horarios específicos
+        const employeeBranch = (employeeBranches || []).find((eb: any) => eb.branch_id === branch.id);
+        allBranchCandidates.push({
+          employee,
+          branch,
+          employeeBranch: employeeBranch || null,
+          distance
+        });
+      });
+    }
+
+    console.log('🔍 [VALIDATE] Total de sucursales encontradas (de todos los empleados):', allBranchCandidates.length);
+
+    if (allBranchCandidates.length === 0) {
+      console.log('❌ [VALIDATE] ERROR: No tienes sucursales activas asignadas en ningún empleado');
+      return withCors(origin, Response.json({
+        valid: false,
+        message: 'No tienes sucursales activas asignadas',
+      }));
+    }
+
+    // 3) Seleccionar la sucursal MÁS CERCANA de todas (sin importar el radio todavía)
+    const closestCandidate = allBranchCandidates.reduce((closest, candidate) => {
+      return candidate.distance < closest.distance ? candidate : closest;
+    });
+
+    const employee = closestCandidate.employee;
+    const closest = { branch: closestCandidate.branch, distance: closestCandidate.distance };
+    const employeeBranch = closestCandidate.employeeBranch;
+
+    console.log('✅ [VALIDATE] Sucursal MÁS CERCANA seleccionada:', {
+      empleado: employee.full_name,
+      empleado_id: employee.id,
+      negocio_id: employee.business_id,
+      sucursal: closest.branch.name,
+      sucursal_id: closest.branch.id,
+      distancia: closest.distance.toFixed(2) + 'm',
+      radio_permitido: closest.branch.tolerance_radius_meters + 'm'
+    });
+
+    // 4) VALIDAR si la sucursal más cercana está dentro del radio permitido
+    const isWithinRadius = closest.distance <= Number(closest.branch.tolerance_radius_meters);
+    
+    console.log(`🔍 [VALIDATE] Validación de radio: distancia=${closest.distance.toFixed(2)}m, radio permitido=${closest.branch.tolerance_radius_meters}m, dentro del radio=${isWithinRadius}`);
+
+    if (!isWithinRadius) {
+      console.log('❌ [VALIDATE] ERROR: La sucursal más cercana está fuera del radio permitido');
+      console.log('🔍 [VALIDATE] Detalle:', {
+        sucursal: closest.branch.name,
+        distancia: closest.distance.toFixed(2) + 'm',
+        radio_permitido: closest.branch.tolerance_radius_meters + 'm',
+        diferencia: (closest.distance - Number(closest.branch.tolerance_radius_meters)).toFixed(2) + 'm fuera del radio'
+      });
+      return withCors(origin, Response.json({
+        valid: false,
+        message: `No estás dentro del radio permitido de la sucursal más cercana (${closest.branch.name}). Estás a ${closest.distance.toFixed(0)}m y el radio permitido es ${closest.branch.tolerance_radius_meters}m.`,
+      }));
+    }
+
+    console.log('✅ [VALIDATE] Validación exitosa: La sucursal más cercana está dentro del radio permitido');
+
+    console.log('✅ [VALIDATE] Sucursal más cercana seleccionada:', {
+      empleado: employee.full_name,
+      empleado_id: employee.id,
+      negocio_id: employee.business_id,
+      sucursal: closest.branch.name,
+      sucursal_id: closest.branch.id,
+      distancia: closest.distance.toFixed(2) + 'm'
+    });
+
+    // 4) Determinar automáticamente la acción si no se proporciona
     let action = providedAction;
     if (!action) {
-      // Buscar registro activo del día de hoy
+      // Buscar registro activo del día de hoy para este empleado específico
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
       const todayEnd = new Date();
@@ -85,58 +229,15 @@ export async function POST(request: Request) {
       }
     }
 
-    // 3) Fetch active assigned branches with employee-specific hours
-    const { data: employeeBranches } = await supabase
-      .from('employee_branches')
-      .select('branch_id, status, employees_hours_start, employees_hours_end, tolerance_minutes')
-      .eq('employee_id', employee.id);
-
-    const activeBranchIds = (employeeBranches || [])
-      .filter((eb: any) => eb.status === 'active')
-      .map((eb: any) => eb.branch_id);
-    
-    // Crear mapa de horarios por branch_id para acceso rápido
+    // 5) Crear mapa de horarios por branch_id para acceso rápido (solo para la sucursal seleccionada)
     const branchHoursMap = new Map<string, { start: string; end: string; tolerance: number }>();
-    (employeeBranches || []).forEach((eb: any) => {
-      if (eb.status === 'active' && eb.employees_hours_start && eb.employees_hours_end) {
-        branchHoursMap.set(eb.branch_id, {
-          start: eb.employees_hours_start,
-          end: eb.employees_hours_end,
-          tolerance: eb.tolerance_minutes || 0,
-        });
-      }
-    });
-
-    if (activeBranchIds.length === 0) {
-      return withCors(origin, Response.json({ valid: false, message: 'No tienes sucursales activas asignadas' }));
+    if (employeeBranch && employeeBranch.employees_hours_start && employeeBranch.employees_hours_end) {
+      branchHoursMap.set(closest.branch.id, {
+        start: employeeBranch.employees_hours_start,
+        end: employeeBranch.employees_hours_end,
+        tolerance: employeeBranch.tolerance_minutes || 0,
+      });
     }
-
-    const { data: branches } = await supabase
-      .from('branches')
-      .select('id, name, latitude, longitude, tolerance_radius_meters, timezone, business_hours_start, tolerance_minutes')
-      .in('id', activeBranchIds)
-      .eq('status', 'active');
-
-    const validBranches = (branches || []).filter((b: any) => {
-      const distance = calculateDistance(latitude, longitude, Number(b.latitude), Number(b.longitude));
-      return distance <= Number(b.tolerance_radius_meters);
-    });
-
-    if (!validBranches.length) {
-      return withCors(origin, Response.json({
-        valid: false,
-        message: 'No estás en ninguna sucursal asignada. Asegúrate de estar dentro del radio permitido.',
-      }));
-    }
-
-    const closest = validBranches.reduce(
-      (acc: { branch: any; distance: number } | null, b: any) => {
-        const d = calculateDistance(latitude, longitude, Number(b.latitude), Number(b.longitude));
-        if (!acc || d < acc.distance) return { branch: b, distance: d };
-        return acc;
-      },
-      null
-    )!;
 
     if (action === 'check_in') {
       const { data: activeRecord } = await supabase
