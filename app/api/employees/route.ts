@@ -17,17 +17,29 @@ const employeeSchema = z.object({
     z.object({
       start: z.preprocess(
         (val) => {
-          if (!val || typeof val !== 'string') return undefined;
+          if (val === undefined || val === null) return undefined;
+          if (typeof val !== 'string') return undefined;
           const trimmed = val.trim();
-          return trimmed === '' ? undefined : trimmed;
+          if (trimmed === '') return undefined;
+          // Normalizar HH:MM:SS a HH:MM
+          if (trimmed.includes(':') && trimmed.split(':').length === 3) {
+            return trimmed.substring(0, 5); // Toma solo HH:MM
+          }
+          return trimmed;
         },
         z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/).optional()
       ),
       end: z.preprocess(
         (val) => {
-          if (!val || typeof val !== 'string') return undefined;
+          if (val === undefined || val === null) return undefined;
+          if (typeof val !== 'string') return undefined;
           const trimmed = val.trim();
-          return trimmed === '' ? undefined : trimmed;
+          if (trimmed === '') return undefined;
+          // Normalizar HH:MM:SS a HH:MM
+          if (trimmed.includes(':') && trimmed.split(':').length === 3) {
+            return trimmed.substring(0, 5); // Toma solo HH:MM
+          }
+          return trimmed;
         },
         z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/).optional()
       ),

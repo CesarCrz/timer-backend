@@ -15,17 +15,29 @@ const updateSchema = z.object({
     z.object({
       start: z.preprocess(
         (val) => {
-          if (!val || typeof val !== 'string') return undefined;
+          if (val === undefined || val === null) return undefined;
+          if (typeof val !== 'string') return undefined;
           const trimmed = val.trim();
-          return trimmed === '' ? undefined : trimmed;
+          if (trimmed === '') return undefined;
+          // Normalizar HH:MM:SS a HH:MM
+          if (trimmed.includes(':') && trimmed.split(':').length === 3) {
+            return trimmed.substring(0, 5); // Toma solo HH:MM
+          }
+          return trimmed;
         },
         z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/).optional()
       ),
       end: z.preprocess(
         (val) => {
-          if (!val || typeof val !== 'string') return undefined;
+          if (val === undefined || val === null) return undefined;
+          if (typeof val !== 'string') return undefined;
           const trimmed = val.trim();
-          return trimmed === '' ? undefined : trimmed;
+          if (trimmed === '') return undefined;
+          // Normalizar HH:MM:SS a HH:MM
+          if (trimmed.includes(':') && trimmed.split(':').length === 3) {
+            return trimmed.substring(0, 5); // Toma solo HH:MM
+          }
+          return trimmed;
         },
         z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/).optional()
       ),
@@ -47,6 +59,12 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
     const { id } = await ctx.params;
     const employeeId = id;
     const body = await request.json();
+    
+    // Debug: Log para ver qué está llegando
+    if (body.branch_hours) {
+      console.log('🔍 [DEBUG] branch_hours recibido:', JSON.stringify(body.branch_hours, null, 2));
+    }
+    
     const updates = updateSchema.parse(body);
 
     const supabase = createServiceRoleClient();
