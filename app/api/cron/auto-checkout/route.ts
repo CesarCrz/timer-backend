@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
       });
 
       // Procesar cada registro
-      const updates: Array<{ id: string; checkOutTime: string }> = [];
+      const updates: Array<{ id: string; checkOutTime: string; isAutoClosed?: boolean }> = [];
 
       for (const record of activeRecords) {
         try {
