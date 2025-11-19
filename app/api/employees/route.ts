@@ -231,8 +231,13 @@ export async function POST(request: Request) {
     if (isPremium && payload.branch_hours) {
       for (const [branchId, hours] of Object.entries(payload.branch_hours)) {
         const h = hours as { start?: string; end?: string; tolerance?: number };
-        // Si se proporciona start o end, ambos deben estar presentes
-        if ((h.start && !h.end) || (!h.start && h.end)) {
+        
+        // Normalizar strings vacíos a undefined
+        const start = h.start?.trim() || undefined;
+        const end = h.end?.trim() || undefined;
+        
+        // Si se proporciona start o end, ambos deben estar presentes y no vacíos
+        if ((start && !end) || (!start && end)) {
           return withCors(origin, Response.json(
             {
               error: 'Validation error',
@@ -243,10 +248,23 @@ export async function POST(request: Request) {
           ));
         }
         
-        // Si ambos están presentes, validar que start < end
-        if (h.start && h.end) {
-          const [startHour, startMin] = h.start.split(':').map(Number);
-          const [endHour, endMin] = h.end.split(':').map(Number);
+        // Si ambos están presentes, validar formato y que start < end
+        if (start && end) {
+          // Validar formato HH:MM
+          const timeRegex = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
+          if (!timeRegex.test(start) || !timeRegex.test(end)) {
+            return withCors(origin, Response.json(
+              {
+                error: 'Validation error',
+                code: 'VALIDATION_ERROR',
+                message: `Para la sucursal ${branchId}, los horarios deben estar en formato HH:MM (ej: 09:00).`,
+              },
+              { status: 400 }
+            ));
+          }
+          
+          const [startHour, startMin] = start.split(':').map(Number);
+          const [endHour, endMin] = end.split(':').map(Number);
           const startMinutes = startHour * 60 + startMin;
           const endMinutes = endHour * 60 + endMin;
 

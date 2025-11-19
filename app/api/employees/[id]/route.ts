@@ -80,8 +80,13 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
     if (isPremium && updates.branch_hours) {
       for (const [branchId, hours] of Object.entries(updates.branch_hours)) {
         const h = hours as { start?: string; end?: string; tolerance?: number };
-        // Si se proporciona start o end, ambos deben estar presentes
-        if ((h.start && !h.end) || (!h.start && h.end)) {
+        
+        // Normalizar strings vacíos a undefined
+        const start = h.start?.trim() || undefined;
+        const end = h.end?.trim() || undefined;
+        
+        // Si se proporciona start o end, ambos deben estar presentes y no vacíos
+        if ((start && !end) || (!start && end)) {
           return withCors(origin, Response.json(
             {
               error: 'Validation error',
@@ -92,10 +97,23 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
           ));
         }
         
-        // Si ambos están presentes, validar que start < end
-        if (h.start && h.end) {
-          const [startHour, startMin] = h.start.split(':').map(Number);
-          const [endHour, endMin] = h.end.split(':').map(Number);
+        // Si ambos están presentes, validar formato y que start < end
+        if (start && end) {
+          // Validar formato HH:MM
+          const timeRegex = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
+          if (!timeRegex.test(start) || !timeRegex.test(end)) {
+            return withCors(origin, Response.json(
+              {
+                error: 'Validation error',
+                code: 'VALIDATION_ERROR',
+                message: `Para la sucursal ${branchId}, los horarios deben estar en formato HH:MM (ej: 09:00).`,
+              },
+              { status: 400 }
+            ));
+          }
+          
+          const [startHour, startMin] = start.split(':').map(Number);
+          const [endHour, endMin] = end.split(':').map(Number);
           const startMinutes = startHour * 60 + startMin;
           const endMinutes = endHour * 60 + endMin;
 
@@ -163,9 +181,12 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
           // Aplicar horarios si están presentes en branch_hours
           if (branch_hours && branch_hours[bid]) {
             const hours = branch_hours[bid];
-            if (hours.start && hours.end) {
-              row.employees_hours_start = hours.start;
-              row.employees_hours_end = hours.end;
+            // Normalizar strings vacíos
+            const start = hours.start?.trim() || undefined;
+            const end = hours.end?.trim() || undefined;
+            if (start && end) {
+              row.employees_hours_start = start;
+              row.employees_hours_end = end;
               row.tolerance_minutes = hours.tolerance || 0;
             }
           }
@@ -185,9 +206,13 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
           if (newBranchIds.includes(branchId)) {
             const updateData: any = {};
             
-            if (hours.start && hours.end) {
-              updateData.employees_hours_start = hours.start;
-              updateData.employees_hours_end = hours.end;
+            // Normalizar strings vacíos
+            const start = hours.start?.trim() || undefined;
+            const end = hours.end?.trim() || undefined;
+            
+            if (start && end) {
+              updateData.employees_hours_start = start;
+              updateData.employees_hours_end = end;
               updateData.tolerance_minutes = hours.tolerance || 0;
             } else {
               // Si se envía vacío, eliminar horarios específicos (usar horario de sucursal)
