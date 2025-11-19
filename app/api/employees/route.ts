@@ -55,21 +55,84 @@ export async function GET(request: Request) {
       .eq('business_id', businessId)
       .order('created_at', { ascending: false });
     
-    // Transformar la respuesta para que sea más fácil de usar en el frontend
-    const employeesWithBranches = (employees || []).map((emp: any) => ({
-      ...emp,
-      branches: (emp.employee_branches || [])
-        .map((eb: any) => ({
-          id: eb.branch?.id,
-          name: eb.branch?.name,
-          employees_hours_start: eb.employees_hours_start,
-          employees_hours_end: eb.employees_hours_end,
-          tolerance_minutes: eb.tolerance_minutes,
-        }))
-        .filter((b: any) => b.id && b.name),
-    }));
+    // Obtener el estado de invitación para cada empleado
+    const employeeIds = (employees || []).map((emp: any) => emp.id);
+    const { data: invitations } = await supabase
+      .from('employee_invitations')
+      .select('employee_id, status, expires_at')
+      .in('employee_id', employeeIds)
+      .order('created_at', { ascending: false });
     
-    return withCors(origin, Response.json({ employees: employeesWithBranches }));
+    // Crear un mapa de employee_id -> última invitación
+    const invitationMap = new Map<string, { status: string; expires_at: string }>();
+    (invitations || []).forEach((inv: any) => {
+      if (!invitationMap.has(inv.employee_id)) {
+        invitationMap.set(inv.employee_id, {
+          status: inv.status,
+          expires_at: inv.expires_at,
+        });
+      }
+    });
+    
+    const nowIso = new Date().toISOString();
+    
+    // Transformar la respuesta para que sea más fácil de usar en el frontend
+    const employeesWithBranches = (employees || []).map((emp: any) => {
+      const lastInvitation = invitationMap.get(emp.id);
+      let invitationStatus: 'accepted' | 'pending' | 'expired' = 'accepted';
+      
+      if (lastInvitation) {
+        if (lastInvitation.status === 'pending') {
+          // Verificar si está expirada
+          if (lastInvitation.expires_at <= nowIso) {
+            invitationStatus = 'expired';
+          } else {
+            invitationStatus = 'pending';
+          }
+        } else if (lastInvitation.status === 'accepted') {
+          invitationStatus = 'accepted';
+        } else {
+          invitationStatus = 'expired';
+        }
+      } else if (emp.status === 'pending') {
+        // Si no hay invitación pero el empleado está pendiente, asumir que expiró
+        invitationStatus = 'expired';
+      }
+      
+      return {
+        ...emp,
+        invitation_status: invitationStatus,
+        branches: (emp.employee_branches || [])
+          .map((eb: any) => ({
+            id: eb.branch?.id,
+            name: eb.branch?.name,
+            employees_hours_start: eb.employees_hours_start,
+            employees_hours_end: eb.employees_hours_end,
+            tolerance_minutes: eb.tolerance_minutes,
+          }))
+          .filter((b: any) => b.id && b.name),
+      };
+    });
+    
+    // Calcular total y max_allowed para la respuesta
+    const activeCount = employeesWithBranches.filter((e: any) => e.status === 'active').length;
+    const { data: subscription } = await supabase
+      .from('user_subscriptions')
+      .select('tier:subscription_tiers(max_employees)')
+      .eq('business_id', businessId)
+      .eq('status', 'active')
+      .single();
+    
+    const tier = subscription?.tier && !Array.isArray(subscription.tier) 
+      ? subscription.tier as { max_employees?: number }
+      : null;
+    const maxAllowed = tier?.max_employees || 0;
+    
+    return withCors(origin, Response.json({ 
+      employees: employeesWithBranches,
+      total: activeCount,
+      max_allowed: maxAllowed,
+    }));
   } catch (error) {
     return handleApiError(error);
   }
