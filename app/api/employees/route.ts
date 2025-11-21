@@ -79,8 +79,7 @@ export async function GET(request: Request) {
           employee_id,
           check_in_time,
           check_out_time,
-          branch_id,
-          branch:branches(id, name)
+          branch_id
         `)
         .eq('business_id', businessId)
         .not('check_in_time', 'is', null)
@@ -93,6 +92,22 @@ export async function GET(request: Request) {
       }
       
       const activeEmployeeIds = new Set((activeRecords || []).map((r: any) => r.employee_id));
+      const branchIds = new Set((activeRecords || []).map((r: any) => r.branch_id).filter((id: any) => id));
+      
+      // Obtener datos de sucursales
+      let branchesMap = new Map();
+      if (branchIds.size > 0) {
+        const { data: branches } = await supabase
+          .from('branches')
+          .select('id, name')
+          .in('id', Array.from(branchIds));
+        
+        if (branches) {
+          branches.forEach((b: any) => {
+            branchesMap.set(b.id, { id: b.id, name: b.name });
+          });
+        }
+      }
       
       if (activeEmployeeIds.size === 0) {
         return withCors(origin, Response.json({
@@ -137,12 +152,12 @@ export async function GET(request: Request) {
         const durationMinutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
         const durationFormatted = `${durationHours}h ${durationMinutes}m`;
         
+        // Obtener datos de sucursal desde el mapa
+        const branchData = activeRecord?.branch_id ? branchesMap.get(activeRecord.branch_id) : null;
+        
         return {
           ...emp,
-          current_branch: activeRecord?.branch ? {
-            id: activeRecord.branch.id,
-            name: activeRecord.branch.name,
-          } : null,
+          current_branch: branchData || null,
           check_in_time: activeRecord?.check_in_time || null,
           duration: durationFormatted,
           branches: (emp.employee_branches || [])

@@ -39,7 +39,8 @@ export async function GET(request: Request) {
     const { count: activeEmployees } = employeeIds.length > 0 ? await supabase
       .from('attendance_records')
       .select('id', { count: 'exact' })
-      .eq('status', 'active')
+      .not('check_in_time', 'is', null)
+      .is('check_out_time', null)
       .gte('check_in_time', today.toISOString())
       .lte('check_in_time', todayEnd.toISOString())
       .in('employee_id', employeeIds) : { count: 0 };
@@ -69,8 +70,12 @@ export async function GET(request: Request) {
         employee:employees(id, full_name),
         branch:branches(id, name, timezone)
       `)
-      .eq('status', 'active')
+      .not('check_in_time', 'is', null)
+      .is('check_out_time', null)
+      .gte('check_in_time', today.toISOString())
+      .lte('check_in_time', todayEnd.toISOString())
       .in('employee_id', employeeIds)
+      .order('check_in_time', { ascending: false })
       .limit(10) : { data: [] };
 
     // Datos semanales (últimos 7 días) - calcular on_time, late, absent
