@@ -60,6 +60,110 @@ export async function GET(request: Request) {
     const businessId = await getUserBusinessId(user.id);
     const supabase = createServiceRoleClient();
     
+    // Obtener query parameter para filtro
+    const url = new URL(request.url);
+    const filter = url.searchParams.get('filter');
+    
+    // Si el filtro es "working", obtener solo empleados trabajando actualmente
+    if (filter === 'working') {
+      // Obtener registros de asistencia activos (con check-in pero sin check-out)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayStart = new Date(today);
+      const todayEnd = new Date(today);
+      todayEnd.setHours(23, 59, 59, 999);
+      
+      const { data: activeRecords, error: recordsError } = await supabase
+        .from('attendance_records')
+        .select(`
+          employee_id,
+          check_in_time,
+          check_out_time,
+          branch_id,
+          branch:branches(id, name)
+        `)
+        .eq('business_id', businessId)
+        .not('check_in_time', 'is', null)
+        .is('check_out_time', null)
+        .gte('check_in_time', todayStart.toISOString())
+        .lte('check_in_time', todayEnd.toISOString());
+      
+      if (recordsError) {
+        console.error('Error fetching active records:', recordsError);
+      }
+      
+      const activeEmployeeIds = new Set((activeRecords || []).map((r: any) => r.employee_id));
+      
+      if (activeEmployeeIds.size === 0) {
+        return withCors(origin, Response.json({
+          employees: [],
+          total: 0,
+          max_allowed: 0,
+        }));
+      }
+      
+      // Obtener empleados activos que están trabajando
+      const { data: employees } = await supabase
+        .from('employees')
+        .select(`
+          *,
+          employee_branches(
+            branch:branches(id, name),
+            employees_hours_start,
+            employees_hours_end,
+            tolerance_minutes
+          )
+        `)
+        .eq('business_id', businessId)
+        .eq('status', 'active')
+        .in('id', Array.from(activeEmployeeIds))
+        .order('created_at', { ascending: false });
+      
+      // Crear mapa de employee_id -> registro de asistencia activo
+      const activeRecordMap = new Map();
+      (activeRecords || []).forEach((r: any) => {
+        if (!activeRecordMap.has(r.employee_id)) {
+          activeRecordMap.set(r.employee_id, r);
+        }
+      });
+      
+      // Transformar empleados con información de asistencia
+      const employeesWithAttendance = (employees || []).map((emp: any) => {
+        const activeRecord = activeRecordMap.get(emp.id);
+        const checkInTime = activeRecord?.check_in_time ? new Date(activeRecord.check_in_time) : null;
+        const now = new Date();
+        const durationMs = checkInTime ? now.getTime() - checkInTime.getTime() : 0;
+        const durationHours = Math.floor(durationMs / (1000 * 60 * 60));
+        const durationMinutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
+        const durationFormatted = `${durationHours}h ${durationMinutes}m`;
+        
+        return {
+          ...emp,
+          current_branch: activeRecord?.branch ? {
+            id: activeRecord.branch.id,
+            name: activeRecord.branch.name,
+          } : null,
+          check_in_time: activeRecord?.check_in_time || null,
+          duration: durationFormatted,
+          branches: (emp.employee_branches || [])
+            .map((eb: any) => ({
+              id: eb.branch?.id,
+              name: eb.branch?.name,
+              employees_hours_start: eb.employees_hours_start,
+              employees_hours_end: eb.employees_hours_end,
+              tolerance_minutes: eb.tolerance_minutes,
+            }))
+            .filter((b: any) => b.id && b.name),
+        };
+      });
+      
+      return withCors(origin, Response.json({
+        employees: employeesWithAttendance,
+        total: employeesWithAttendance.length,
+        max_allowed: 0, // No aplica para este filtro
+      }));
+    }
+    
     // Obtener empleados con sus branches y horarios (usando left join para incluir empleados sin branches)
     const { data: employees } = await supabase
       .from('employees')

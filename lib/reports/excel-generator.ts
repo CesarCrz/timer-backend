@@ -73,7 +73,7 @@ export async function generateExcelReport(reportData: any[], startDate: string, 
       { header: 'Desc. Tardanza', key: 'late_deduction', width: 18 },
       { header: 'Total Pago', key: 'total', width: 15 },
       { header: 'Tiempo Extra (h)', key: 'overtime', width: 15 },
-      { header: 'Compensación Extra', key: 'overtime_pay', width: 18 },
+      { header: 'Total de horas extras', key: 'overtime_pay', width: 18 },
     ];
 
     // Estilo para encabezados
@@ -120,6 +120,9 @@ export async function generateExcelReport(reportData: any[], startDate: string, 
       sheet.getColumn(col).numFmt = '$#,##0.00';
     });
 
+    // Calcular total de horas extras del empleado
+    const totalOvertimePayment = emp.daily_breakdown.reduce((sum: number, day: any) => sum + (day.overtime_payment || 0), 0);
+    
     // Agregar fila de resumen del empleado
     const empSummaryRow = sheet.addRow({
       date: 'RESUMEN',
@@ -132,6 +135,7 @@ export async function generateExcelReport(reportData: any[], startDate: string, 
       late_deduction: '',
       total: parseFloat(emp.summary.total_payment),
       overtime: parseFloat(emp.summary.total_overtime),
+      overtime_pay: totalOvertimePayment,
       overtime_pay: '',
     });
     empSummaryRow.font = { bold: true };

@@ -146,41 +146,89 @@ export async function POST(request: Request) {
     
     // Crear las relaciones employee_branches solo cuando acepta la invitación
     if (branchIds.length > 0) {
-      const rows = branchIds.map((bid: string) => {
-        const hours = branchHours[bid] || {};
-        const row: { 
-          employee_id: string; 
-          branch_id: string; 
-          status: string;
-          employees_hours_start?: string;
-          employees_hours_end?: string;
-          tolerance_minutes?: number;
-        } = { 
-          employee_id: employee.id, 
-          branch_id: bid, 
-          status: 'active' 
-        };
-        
-        // Aplicar horarios específicos si están presentes
-        if (hours && typeof hours === 'object' && hours.start && hours.end) {
-          row.employees_hours_start = String(hours.start);
-          row.employees_hours_end = String(hours.end);
-          row.tolerance_minutes = typeof hours.tolerance === 'number' ? hours.tolerance : 0;
-        }
-        
-        return row;
-      });
-      
-      const { error: branchError } = await supabase
+      // Verificar si ya existen relaciones employee_branches para este empleado
+      const { data: existingBranches, error: checkError } = await supabase
         .from('employee_branches')
-        .insert(rows);
+        .select('branch_id')
+        .eq('employee_id', employee.id);
       
-      if (branchError) {
-        console.error('❌ [ACCEPT] Error inserting employee_branches:', branchError);
-        throw new ValidationError(branchError.message || 'Error al asignar sucursales', { 
-          code: 'BRANCH_ASSIGNMENT_ERROR',
-          details: branchError 
+      if (checkError) {
+        console.warn('⚠️ [ACCEPT] Error al verificar branches existentes (continuando):', checkError);
+      }
+      
+      const existingBranchIds = new Set((existingBranches || []).map((eb: any) => eb.branch_id));
+      
+      // Filtrar solo las branches que no existen ya
+      const newBranchIds = branchIds.filter((bid: string) => !existingBranchIds.has(bid));
+      
+      if (newBranchIds.length > 0) {
+        const rows = newBranchIds.map((bid: string) => {
+          const hours = branchHours[bid] || {};
+          const row: { 
+            employee_id: string; 
+            branch_id: string; 
+            status: string;
+            employees_hours_start?: string;
+            employees_hours_end?: string;
+            tolerance_minutes?: number;
+          } = { 
+            employee_id: employee.id, 
+            branch_id: bid, 
+            status: 'active' 
+          };
+          
+          // Aplicar horarios específicos si están presentes
+          if (hours && typeof hours === 'object' && hours.start && hours.end) {
+            row.employees_hours_start = String(hours.start);
+            row.employees_hours_end = String(hours.end);
+            row.tolerance_minutes = typeof hours.tolerance === 'number' ? hours.tolerance : 0;
+          }
+          
+          return row;
         });
+        
+        const { error: branchError } = await supabase
+          .from('employee_branches')
+          .insert(rows);
+        
+        if (branchError) {
+          console.error('❌ [ACCEPT] Error inserting employee_branches:', branchError);
+          // Si el error es por duplicado (código 23505), no es crítico
+          if (branchError.code === '23505') {
+            console.warn('⚠️ [ACCEPT] Duplicate key error (algunas branches ya existían, continuando)');
+          } else {
+            throw new ValidationError(branchError.message || 'Error al asignar sucursales', { 
+              code: 'BRANCH_ASSIGNMENT_ERROR',
+              details: branchError 
+            });
+          }
+        } else {
+          console.log(`✅ [ACCEPT] ${rows.length} relación(es) employee_branches creada(s)`);
+        }
+      } else {
+        console.log('ℹ️ [ACCEPT] Todas las branches ya están asignadas al empleado');
+      }
+      
+      // Actualizar horarios específicos para branches existentes si se proporcionaron
+      for (const bid of branchIds) {
+        const hours = branchHours[bid];
+        if (hours && typeof hours === 'object' && hours.start && hours.end && existingBranchIds.has(bid)) {
+          const updateData: any = {
+            employees_hours_start: String(hours.start),
+            employees_hours_end: String(hours.end),
+            tolerance_minutes: typeof hours.tolerance === 'number' ? hours.tolerance : 0,
+          };
+          
+          const { error: updateError } = await supabase
+            .from('employee_branches')
+            .update(updateData)
+            .eq('employee_id', employee.id)
+            .eq('branch_id', bid);
+          
+          if (updateError) {
+            console.warn(`⚠️ [ACCEPT] Error al actualizar horarios para branch ${bid}:`, updateError);
+          }
+        }
       }
     }
 

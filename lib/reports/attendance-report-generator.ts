@@ -127,6 +127,7 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
             dailyRecords: [],
             workedHours: 0,
             overtimeHours: 0,
+            totalOvertimePayment: 0, // Total de horas extras acumulado
             absenceHours: 0,
             attendanceRate: 0,
             calculatedSalary: 0,
@@ -168,6 +169,7 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
         empInBranch.workedHours += day.hours_worked;
         empInBranch.overtimeHours += day.overtime_hours;
         empInBranch.calculatedSalary += day.total_payment;
+        empInBranch.totalOvertimePayment += day.overtime_payment; // Sumar horas extras
       });
     });
 
@@ -285,6 +287,7 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
         }),
         totalWorkedHours: typeof emp.summary.total_hours === 'number' ? formatTimeWorked(emp.summary.total_hours) : emp.summary.total_hours,
         calculatedSalary: formatCurrency(emp.summary.total_payment),
+        totalOvertimePayment: emp.daily_breakdown.reduce((sum: number, day: any) => sum + (day.overtime_payment || 0), 0),
       },
       formatCurrency,
       branchHoursStart || '08:00',
@@ -386,6 +389,12 @@ function generateBranchSectionHTML(
               ${emp.calculatedSalary}
             </div>
             <div style="font-size: 12px; color: #6b7280;">Sueldo Total</div>
+            ${emp.totalOvertimePayment > 0 ? `
+              <div style="font-size: 14px; font-weight: 700; color: #f59e0b; margin-top: 8px;">
+                ${formatCurrency(emp.totalOvertimePayment)}
+              </div>
+              <div style="font-size: 12px; color: #6b7280;">Total de horas extras</div>
+            ` : ''}
           </div>
         </div>
 
@@ -421,7 +430,7 @@ function generateBranchSectionHTML(
               <th>Desc. Tardanza</th>
               <th>Sueldo Total</th>
               <th>Tiempo Extra</th>
-              <th>Compensación Extra</th>
+              <th>Total de horas extras</th>
             </tr>
           </thead>
           <tbody>
@@ -502,9 +511,15 @@ function generatePersonalSectionHTML(
         <div class="summary-value">${employee.totalWorkedHours}</div>
       </div>
       <div class="summary-card warning">
-        <div class="summary-label">Sueldo Final</div>
+        <div class="summary-label">Sueldo Total</div>
         <div class="summary-value">${employee.calculatedSalary}</div>
       </div>
+      ${employee.totalOvertimePayment > 0 ? `
+      <div class="summary-card" style="background: #fef3c7; border-color: #f59e0b;">
+        <div class="summary-label">Total de horas extras</div>
+        <div class="summary-value">${formatCurrency(employee.totalOvertimePayment)}</div>
+      </div>
+      ` : ''}
     </div>
 
     <table>
@@ -520,7 +535,7 @@ function generatePersonalSectionHTML(
           <th>Desc. Tardanza</th>
           <th>Sueldo Total</th>
           <th>Tiempo Extra</th>
-          <th>Compensación Extra</th>
+          <th>Total de horas extras</th>
         </tr>
       </thead>
       <tbody>

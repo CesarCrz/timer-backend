@@ -127,20 +127,26 @@ export function calculateAttendanceMetrics(record: AttendanceRecord): DailyCalcu
 
   const hourlyRate = record.employee.hourly_rate;
   
-  // Sueldo base día: 8 horas * tarifa por hora
+  // Sueldo base día: 8 horas * tarifa por hora (para mostrar en reporte)
   const basePayment = hourlyRate * 8;
   
-  // Pago con descuento por tardanza: tarifa * horas efectivas
-  const paymentWithLate = hourlyRate * effectiveHours;
-  
-  // Desc. Tardanza: equivalente monetario del tiempo no laborado
+  // Desc. Tardanza: equivalente monetario del tiempo no laborado (para mostrar en reporte)
   const lateDeduction = unpaidMinutes > 0 ? hourlyRate * (unpaidMinutes / 60) : 0;
   
-  // Compensación Extra: equivalente monetario del tiempo extra
-  const overtimePayment = hourlyRate * overtimeHours;
+  // NUEVA LÓGICA según requerimientos:
+  // Sueldo Total = horas trabajadas * tarifa por hora (máximo 8 horas regulares)
+  // Si trabajó más de 8 horas, las horas extras se calculan por separado
+  const regularHours = Math.min(hoursWorked, 8); // Máximo 8 horas para sueldo regular
+  const overtimeHoursForPayment = Math.max(0, hoursWorked - 8); // Horas después de 8
   
-  // Sueldo Total: pago con descuento + compensación extra
-  const totalPayment = paymentWithLate + overtimePayment;
+  // Sueldo Total: solo las primeras 8 horas (o menos) * tarifa (sin descuentos)
+  const totalPayment = hourlyRate * regularHours;
+  
+  // Total horas extras: tiempo trabajado después de 8 horas * tarifa (solo informativo, opcional pagar)
+  const overtimePayment = hourlyRate * overtimeHoursForPayment;
+  
+  // Mantener paymentWithLate para compatibilidad (pero no se usa en Sueldo Total)
+  const paymentWithLate = hourlyRate * effectiveHours;
 
   // Usar is_late de la BD si está disponible, sino calcularlo según tolerancia
   const isLate = record.is_late !== undefined ? record.is_late : checkIn.isAfter(allowedStart);

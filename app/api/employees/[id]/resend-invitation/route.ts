@@ -50,16 +50,70 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       }
     }
 
+    // IMPORTANTE: Desactivar todas las invitaciones pendientes anteriores para evitar duplicados
+    console.log(`🔍 [RESEND] Desactivando invitaciones pendientes anteriores para el empleado ${employeeId}`);
+    const { error: cancelError } = await supabase
+      .from('employee_invitations')
+      .update({ status: 'cancelled' })
+      .eq('employee_id', employeeId)
+      .eq('status', 'pending');
+    
+    if (cancelError) {
+      console.warn(`⚠️ [RESEND] Error al cancelar invitaciones anteriores (no crítico):`, cancelError);
+    } else {
+      console.log(`✅ [RESEND] Invitaciones anteriores canceladas exitosamente`);
+    }
+
     const token = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    await supabase
+    
+    // Obtener branch_hours de la última invitación si existe (para mantener horarios específicos)
+    let branchHours: Record<string, { start?: string; end?: string; tolerance?: number }> | undefined = undefined;
+    if (branchIds.length === 0) {
+      const { data: lastInvitation } = await supabase
+        .from('employee_invitations')
+        .select('branch_hours')
+        .eq('employee_id', employeeId)
+        .in('status', ['pending', 'cancelled', 'expired'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      if (lastInvitation?.branch_hours) {
+        if (typeof lastInvitation.branch_hours === 'object' && lastInvitation.branch_hours !== null) {
+          branchHours = lastInvitation.branch_hours as Record<string, { start?: string; end?: string; tolerance?: number }>;
+        } else if (typeof lastInvitation.branch_hours === 'string') {
+          try {
+            branchHours = JSON.parse(lastInvitation.branch_hours);
+          } catch (e) {
+            console.warn('Error parsing branch_hours from last invitation:', e);
+          }
+        }
+      }
+    }
+    
+    const invitationData: any = {
+      employee_id: employeeId, 
+      token, 
+      expires_at: expiresAt,
+      branch_ids: invitationBranchIds // Guardar branch_ids como JSONB
+    };
+    
+    // Incluir branch_hours si existe
+    if (branchHours && Object.keys(branchHours).length > 0) {
+      invitationData.branch_hours = branchHours;
+    }
+    
+    const { error: insertError } = await supabase
       .from('employee_invitations')
-      .insert({ 
-        employee_id: employeeId, 
-        token, 
-        expires_at: expiresAt,
-        branch_ids: invitationBranchIds // Guardar branch_ids como JSONB
-      });
+      .insert(invitationData);
+    
+    if (insertError) {
+      console.error('❌ [RESEND] Error al insertar nueva invitación:', insertError);
+      throw new Error(insertError.message || 'Error al crear nueva invitación');
+    }
+    
+    console.log(`✅ [RESEND] Nueva invitación creada con token: ${token}`);
 
     const { data: branches } = await supabase
       .from('branches')
