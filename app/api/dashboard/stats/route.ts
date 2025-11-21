@@ -20,10 +20,23 @@ export async function GET(request: Request) {
     const businessId = await getUserBusinessId(user.id);
     const supabase = createServiceRoleClient();
 
-    // Obtener fecha de hoy en UTC (las fechas en la BD están en UTC)
-    const today = new Date();
-    const todayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0, 0));
-    const todayEndUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 23, 59, 59, 999));
+    // Obtener timezone del negocio
+    const { data: business } = await supabase
+      .from('businesses')
+      .select('timezone')
+      .eq('id', businessId)
+      .single();
+    
+    const businessTimezone = business?.timezone || 'America/Mexico_City';
+    
+    // Obtener fecha de hoy según el timezone del negocio
+    const nowInBusinessTZ = dayjs().tz(businessTimezone);
+    const todayStart = nowInBusinessTZ.startOf('day');
+    const todayEnd = nowInBusinessTZ.endOf('day');
+    
+    // Convertir a UTC para consultas en la BD (las fechas se almacenan en UTC)
+    const todayStartUTC = todayStart.utc();
+    const todayEndUTC = todayEnd.utc();
 
     // Obtener IDs de empleados activos del negocio
     const { data: activeEmployeeIds } = await supabase
@@ -34,15 +47,13 @@ export async function GET(request: Request) {
 
     const employeeIds = activeEmployeeIds?.map(e => e.id) || [];
 
-    // Empleados activos hoy (check-ins sin check-out)
-    // Filtrar por fecha en UTC
+    // Empleados activos ahora (check-ins sin check-out) - NO filtrar por fecha
+    // Debe mostrar todos los empleados trabajando, sin importar cuándo hicieron check-in
     const { count: activeEmployees } = employeeIds.length > 0 ? await supabase
       .from('attendance_records')
       .select('id', { count: 'exact' })
       .not('check_in_time', 'is', null)
       .is('check_out_time', null)
-      .gte('check_in_time', todayUTC.toISOString())
-      .lte('check_in_time', todayEndUTC.toISOString())
       .in('employee_id', employeeIds) : { count: 0 };
 
     // Total de empleados activos
@@ -53,11 +64,12 @@ export async function GET(request: Request) {
       .eq('status', 'active');
 
     // Llegadas tarde hoy - usar campo is_late de attendance_records
+    // Filtrar por fecha de hoy según timezone del negocio
     const { count: lateArrivalsCount } = employeeIds.length > 0 ? await supabase
       .from('attendance_records')
       .select('id', { count: 'exact' })
       .eq('is_late', true)
-      .gte('check_in_time', todayUTC.toISOString())
+      .gte('check_in_time', todayStartUTC.toISOString())
       .lte('check_in_time', todayEndUTC.toISOString())
       .in('employee_id', employeeIds) : { count: 0 };
 
@@ -78,21 +90,17 @@ export async function GET(request: Request) {
       .limit(10) : { data: [] };
 
     // Datos semanales (últimos 7 días) - calcular on_time, late, absent
-    const weekStart = new Date(today);
-    weekStart.setDate(today.getDate() - 7);
-    
+    // Usar timezone del negocio para calcular los días
     const weeklyChart = [];
     for (let i = 6; i >= 0; i--) {
-      const date = new Date(today);
-      date.setDate(today.getDate() - i);
-      const dayStart = new Date(date);
-      dayStart.setHours(0, 0, 0, 0);
-      const dayEnd = new Date(date);
-      dayEnd.setHours(23, 59, 59, 999);
-
-      // Convertir fechas del día a UTC
-      const dayStartUTC = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0, 0));
-      const dayEndUTC = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999));
+      // Calcular fecha del día según timezone del negocio
+      const dayInBusinessTZ = nowInBusinessTZ.subtract(i, 'day');
+      const dayStart = dayInBusinessTZ.startOf('day');
+      const dayEnd = dayInBusinessTZ.endOf('day');
+      
+      // Convertir a UTC para consultas en la BD
+      const dayStartUTC = dayStart.utc();
+      const dayEndUTC = dayEnd.utc();
       
       const { data: dayRecords } = await supabase
         .from('attendance_records')
@@ -117,8 +125,22 @@ export async function GET(request: Request) {
       // Absent = empleados activos - (on_time + late)
       const absent = Math.max(0, (totalEmployees || 0) - (onTime + late));
 
+      // Formatear día según timezone del negocio
+      const dayName = dayInBusinessTZ.format('ddd').toLowerCase();
+      const dayNameMap: Record<string, string> = {
+        'dom': 'dom',
+        'lun': 'lun',
+        'mar': 'mar',
+        'mié': 'mié',
+        'mie': 'mié',
+        'jue': 'jue',
+        'vie': 'vie',
+        'sáb': 'sáb',
+        'sab': 'sáb'
+      };
+
       weeklyChart.push({
-        day: date.toLocaleDateString('es-MX', { weekday: 'short' }),
+        day: dayNameMap[dayName] || dayName,
         on_time: onTime,
         late: late,
         absent: absent,
