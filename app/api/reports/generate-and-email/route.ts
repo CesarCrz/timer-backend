@@ -6,6 +6,12 @@ import { calculateAttendanceMetrics } from '@/lib/reports/calculator';
 import { sendEmail } from '@/lib/emails/client';
 import { sendEmailWithAttachment } from '@/lib/emails/nodemailer-client';
 import { renderTemplate } from '@/lib/emails/templates';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const schema = z.object({
   branch_ids: z.array(z.string().uuid()).optional(),
@@ -30,19 +36,24 @@ export async function POST(request: Request) {
 
     const supabase = createServiceRoleClient();
     
-    // Obtener información del negocio (nombre y moneda)
+    // Obtener información del negocio (incluyendo timezone)
     const businessId = await getUserBusinessId(user.id);
     const { data: business } = await supabase
       .from('businesses')
-      .select('name, currency')
+      .select('name, currency, timezone')
       .eq('id', businessId)
       .single();
     const currency = business?.currency || 'MXN';
+    const businessTimezone = business?.timezone || 'America/Mexico_City';
     
-    // Construir fechas de inicio y fin del día en UTC
-    // Usar formato ISO para asegurar compatibilidad con Supabase
-    const startDateTime = `${params.start_date}T00:00:00.000Z`;
-    const endDateTime = `${params.end_date}T23:59:59.999Z`;
+    // Convertir fechas del usuario (asumiendo que están en el timezone del negocio) a UTC
+    // El usuario selecciona fechas en su timezone local, necesitamos convertirlas a UTC para consultar la BD
+    const startDateInTZ = dayjs.tz(`${params.start_date} 00:00:00`, businessTimezone);
+    const endDateInTZ = dayjs.tz(`${params.end_date} 23:59:59`, businessTimezone);
+    
+    // Convertir a UTC para la consulta inicial (rango amplio para capturar todos los registros posibles)
+    const startDateTime = startDateInTZ.utc().subtract(1, 'day').startOf('day').toISOString();
+    const endDateTime = endDateInTZ.utc().add(1, 'day').endOf('day').toISOString();
     
     console.log('Query params:', {
       start_date: params.start_date,
@@ -129,8 +140,42 @@ export async function POST(request: Request) {
       };
     }));
 
+    // Filtrar registros según el timezone de cada sucursal
+    // Verificar que el check_in_time convertido al timezone de la sucursal esté dentro del rango seleccionado
+    const filteredRecords = recordsWithHours.filter((rec: any) => {
+      if (!rec.check_in_time) return false;
+      
+      // Obtener timezone de la sucursal (o usar el del negocio como fallback)
+      const branchTZ = rec.branch?.timezone || businessTimezone;
+      
+      // Convertir check_in_time (UTC en BD) al timezone de la sucursal
+      const checkInInBranchTZ = dayjs.utc(rec.check_in_time).tz(branchTZ);
+      const checkInDate = checkInInBranchTZ.format('YYYY-MM-DD');
+      
+      // Log para depuración
+      console.log('Filtering record:', {
+        check_in_time_utc: rec.check_in_time,
+        branch_timezone: branchTZ,
+        check_in_date_in_tz: checkInDate,
+        start_date: params.start_date,
+        end_date: params.end_date,
+        in_range: checkInDate >= params.start_date && checkInDate <= params.end_date
+      });
+      
+      // Verificar que la fecha esté dentro del rango seleccionado
+      const isInRange = checkInDate >= params.start_date && checkInDate <= params.end_date;
+      
+      if (!isInRange) {
+        console.log(`Record filtered out: ${checkInDate} is not between ${params.start_date} and ${params.end_date}`);
+      }
+      
+      return isInRange;
+    });
+    
+    console.log(`Filtered ${filteredRecords.length} records from ${recordsWithHours.length} total records`);
+
     const byEmployee: Record<string, any> = {};
-    recordsWithHours.forEach((rec: any) => {
+    filteredRecords.forEach((rec: any) => {
       const key = rec.employee_id;
       if (!byEmployee[key]) byEmployee[key] = { employee: rec.employee, records: [] };
       byEmployee[key].records.push(rec);
@@ -217,6 +262,7 @@ export async function POST(request: Request) {
         employeeId,
         employeeEmail,
         employeePhone,
+        businessTimezone, // Pasar timezone del negocio para mostrar fecha de generación correcta
       });
       const puppeteer = await import('puppeteer');
       

@@ -3,6 +3,12 @@ import { handleApiError } from '@/lib/utils/errors';
 import { createServiceRoleClient, getCurrentUser, getUserBusinessId } from '@/lib/utils/auth';
 import { generateAttendanceReportHTML } from '@/lib/reports/attendance-report-generator';
 import { calculateAttendanceMetrics } from '@/lib/reports/calculator';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 export async function OPTIONS(request: Request) {
   const origin = request.headers.get('origin');
@@ -32,10 +38,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       );
     }
 
-    // Obtener información del negocio
+    // Obtener información del negocio (incluyendo timezone)
     const { data: business } = await supabase
       .from('businesses')
-      .select('name, currency')
+      .select('name, currency, timezone')
       .eq('id', businessId)
       .single();
 
@@ -46,14 +52,24 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       );
     }
 
+    const businessTimezone = business?.timezone || 'America/Mexico_City';
+    
+    // Convertir fechas del usuario (asumiendo que están en el timezone del negocio) a UTC
+    const startDateInTZ = dayjs.tz(`${reportHistory.start_date} 00:00:00`, businessTimezone);
+    const endDateInTZ = dayjs.tz(`${reportHistory.end_date} 23:59:59`, businessTimezone);
+    
+    // Convertir a UTC para la consulta inicial (rango amplio para capturar todos los registros posibles)
+    const startDateTime = startDateInTZ.utc().subtract(1, 'day').startOf('day').toISOString();
+    const endDateTime = endDateInTZ.utc().add(1, 'day').endOf('day').toISOString();
+
     // Construir query para obtener registros de asistencia
     let query = supabase
       .from('attendance_records')
       .select('*, employee:employees(full_name, hourly_rate, phone), branch:branches(name, business_hours_start, business_hours_end, timezone, address, tolerance_minutes)')
       .eq('status', 'completed')
       .not('check_out_time', 'is', null)
-      .gte('check_in_time', `${reportHistory.start_date}T00:00:00.000Z`)
-      .lte('check_in_time', `${reportHistory.end_date}T23:59:59.999Z`);
+      .gte('check_in_time', startDateTime)
+      .lte('check_in_time', endDateTime);
 
     // Filtrar por business_id a través de employees
     const { data: businessEmployees } = await supabase
@@ -86,9 +102,38 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       );
     }
 
+    // Filtrar registros según el timezone de cada sucursal
+    const filteredRecords = (records || []).filter((rec: any) => {
+      if (!rec.check_in_time) return false;
+      
+      const branchTZ = rec.branch?.timezone || businessTimezone;
+      const checkInInBranchTZ = dayjs.utc(rec.check_in_time).tz(branchTZ);
+      const checkInDate = checkInInBranchTZ.format('YYYY-MM-DD');
+      
+      // Log para depuración
+      console.log('Filtering record:', {
+        check_in_time_utc: rec.check_in_time,
+        branch_timezone: branchTZ,
+        check_in_date_in_tz: checkInDate,
+        start_date: reportHistory.start_date,
+        end_date: reportHistory.end_date,
+        in_range: checkInDate >= reportHistory.start_date && checkInDate <= reportHistory.end_date
+      });
+      
+      const isInRange = checkInDate >= reportHistory.start_date && checkInDate <= reportHistory.end_date;
+      
+      if (!isInRange) {
+        console.log(`Record filtered out: ${checkInDate} is not between ${reportHistory.start_date} and ${reportHistory.end_date}`);
+      }
+      
+      return isInRange;
+    });
+    
+    console.log(`Filtered ${filteredRecords.length} records from ${(records || []).length} total records`);
+
     // Agrupar por empleado
     const byEmployee: Record<string, any> = {};
-    (records || []).forEach((rec: any) => {
+    filteredRecords.forEach((rec: any) => {
       const key = rec.employee_id;
       if (!byEmployee[key]) byEmployee[key] = { employee: rec.employee, records: [] };
       byEmployee[key].records.push(rec);
@@ -166,6 +211,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       employeeId,
       employeeEmail: undefined,
       employeePhone,
+      businessTimezone, // Pasar timezone del negocio para mostrar fecha de generación correcta
     });
 
     // Generar PDF o Excel según el formato original

@@ -3,6 +3,12 @@ import { withCors, preflight } from '@/lib/utils/cors';
 import { handleApiError } from '@/lib/utils/errors';
 import { createServiceRoleClient, getCurrentUser, getUserBusinessId } from '@/lib/utils/auth';
 import { calculateAttendanceMetrics } from '@/lib/reports/calculator';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const schema = z.object({
   business_id: z.string().uuid().optional(),
@@ -27,6 +33,22 @@ export async function POST(request: Request) {
 
     const supabase = createServiceRoleClient();
 
+    // Obtener información del negocio (incluyendo timezone)
+    const { data: business } = await supabase
+      .from('businesses')
+      .select('timezone')
+      .eq('id', businessId)
+      .single();
+    const businessTimezone = business?.timezone || 'America/Mexico_City';
+    
+    // Convertir fechas del usuario (asumiendo que están en el timezone del negocio) a UTC
+    const startDateInTZ = dayjs.tz(`${params.start_date} 00:00:00`, businessTimezone);
+    const endDateInTZ = dayjs.tz(`${params.end_date} 23:59:59`, businessTimezone);
+    
+    // Convertir a UTC para la consulta inicial (rango amplio para capturar todos los registros posibles)
+    const startDateTime = startDateInTZ.utc().subtract(1, 'day').startOf('day').toISOString();
+    const endDateTime = endDateInTZ.utc().add(1, 'day').endOf('day').toISOString();
+
     // Fetch completed records for date range and optional branches
     // Incluir horarios de employee_branches para cada registro
     let query = supabase
@@ -35,7 +57,7 @@ export async function POST(request: Request) {
       .eq('status', 'completed');
 
     if (params.branch_ids && params.branch_ids.length) query = query.in('branch_id', params.branch_ids);
-    query = query.gte('check_in_time', `${params.start_date}T00:00:00.000Z`).lte('check_in_time', `${params.end_date}T23:59:59.999Z`);
+    query = query.gte('check_in_time', startDateTime).lte('check_in_time', endDateTime);
 
     const { data: records } = await query.order('check_in_time', { ascending: true });
 
@@ -60,8 +82,37 @@ export async function POST(request: Request) {
       };
     }));
 
+    // Filtrar registros según el timezone de cada sucursal
+    const filteredRecords = recordsWithHours.filter((rec: any) => {
+      if (!rec.check_in_time) return false;
+      
+      const branchTZ = rec.branch?.timezone || businessTimezone;
+      const checkInInBranchTZ = dayjs.utc(rec.check_in_time).tz(branchTZ);
+      const checkInDate = checkInInBranchTZ.format('YYYY-MM-DD');
+      
+      // Log para depuración
+      console.log('Filtering record:', {
+        check_in_time_utc: rec.check_in_time,
+        branch_timezone: branchTZ,
+        check_in_date_in_tz: checkInDate,
+        start_date: params.start_date,
+        end_date: params.end_date,
+        in_range: checkInDate >= params.start_date && checkInDate <= params.end_date
+      });
+      
+      const isInRange = checkInDate >= params.start_date && checkInDate <= params.end_date;
+      
+      if (!isInRange) {
+        console.log(`Record filtered out: ${checkInDate} is not between ${params.start_date} and ${params.end_date}`);
+      }
+      
+      return isInRange;
+    });
+    
+    console.log(`Filtered ${filteredRecords.length} records from ${recordsWithHours.length} total records`);
+
     const byEmployee: Record<string, any> = {};
-    recordsWithHours.forEach((rec: any) => {
+    filteredRecords.forEach((rec: any) => {
       const key = rec.employee_id;
       if (!byEmployee[key]) byEmployee[key] = { employee: rec.employee, records: [] };
       byEmployee[key].records.push(rec);

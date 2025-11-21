@@ -24,6 +24,7 @@ type ReportParams = {
   employeeId?: string;
   employeeEmail?: string;
   employeePhone?: string;
+  businessTimezone?: string;
 };
 
 export function generateAttendanceReportHTML(params: ReportParams): string {
@@ -43,6 +44,7 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
     employeeId,
     employeeEmail,
     employeePhone,
+    businessTimezone,
   } = params;
 
   if (!reportData || reportData.length === 0) {
@@ -75,7 +77,9 @@ export function generateAttendanceReportHTML(params: ReportParams): string {
     return `${h}h ${m}m`;
   };
 
-  const generatedDate = dayjs().format('DD [de] MMMM [de] YYYY, hh:mm A');
+  // Mostrar fecha de generación en el timezone del negocio
+  const tz = businessTimezone || branchTimezone || 'America/Mexico_City';
+  const generatedDate = dayjs().tz(tz).format('DD [de] MMMM [de] YYYY, hh:mm A');
 
   let reportContent = '';
 
