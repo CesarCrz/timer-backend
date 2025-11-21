@@ -66,13 +66,25 @@ export async function GET(request: Request) {
     
     // Si el filtro es "working", obtener solo empleados trabajando actualmente
     if (filter === 'working') {
-      // Obtener registros de asistencia activos (con check-in pero sin check-out)
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayStart = new Date(today);
-      const todayEnd = new Date(today);
-      todayEnd.setHours(23, 59, 59, 999);
+      // Primero obtener IDs de empleados del negocio
+      const { data: businessEmployees } = await supabase
+        .from('employees')
+        .select('id')
+        .eq('business_id', businessId)
+        .eq('status', 'active');
       
+      const employeeIds = businessEmployees?.map(e => e.id) || [];
+      
+      if (employeeIds.length === 0) {
+        return withCors(origin, Response.json({
+          employees: [],
+          total: 0,
+          max_allowed: 0,
+        }));
+      }
+      
+      // Obtener registros de asistencia activos (con check-in pero sin check-out)
+      // No filtrar por fecha específica, solo por empleados del negocio y sin check-out
       const { data: activeRecords, error: recordsError } = await supabase
         .from('attendance_records')
         .select(`
@@ -81,11 +93,9 @@ export async function GET(request: Request) {
           check_out_time,
           branch_id
         `)
-        .eq('business_id', businessId)
+        .in('employee_id', employeeIds)
         .not('check_in_time', 'is', null)
-        .is('check_out_time', null)
-        .gte('check_in_time', todayStart.toISOString())
-        .lte('check_in_time', todayEnd.toISOString());
+        .is('check_out_time', null);
       
       if (recordsError) {
         console.error('Error fetching active records:', recordsError);

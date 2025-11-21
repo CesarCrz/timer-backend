@@ -20,11 +20,10 @@ export async function GET(request: Request) {
     const businessId = await getUserBusinessId(user.id);
     const supabase = createServiceRoleClient();
 
-    // Obtener fecha de hoy
+    // Obtener fecha de hoy en UTC (las fechas en la BD están en UTC)
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayEnd = new Date(today);
-    todayEnd.setHours(23, 59, 59, 999);
+    const todayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0, 0));
+    const todayEndUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 23, 59, 59, 999));
 
     // Obtener IDs de empleados activos del negocio
     const { data: activeEmployeeIds } = await supabase
@@ -36,13 +35,14 @@ export async function GET(request: Request) {
     const employeeIds = activeEmployeeIds?.map(e => e.id) || [];
 
     // Empleados activos hoy (check-ins sin check-out)
+    // Filtrar por fecha en UTC
     const { count: activeEmployees } = employeeIds.length > 0 ? await supabase
       .from('attendance_records')
       .select('id', { count: 'exact' })
       .not('check_in_time', 'is', null)
       .is('check_out_time', null)
-      .gte('check_in_time', today.toISOString())
-      .lte('check_in_time', todayEnd.toISOString())
+      .gte('check_in_time', todayUTC.toISOString())
+      .lte('check_in_time', todayEndUTC.toISOString())
       .in('employee_id', employeeIds) : { count: 0 };
 
     // Total de empleados activos
@@ -57,11 +57,12 @@ export async function GET(request: Request) {
       .from('attendance_records')
       .select('id', { count: 'exact' })
       .eq('is_late', true)
-      .gte('check_in_time', today.toISOString())
-      .lte('check_in_time', todayEnd.toISOString())
+      .gte('check_in_time', todayUTC.toISOString())
+      .lte('check_in_time', todayEndUTC.toISOString())
       .in('employee_id', employeeIds) : { count: 0 };
 
     // Empleados activos ahora (check-ins sin check-out)
+    // No filtrar por fecha específica para "ahora", solo por empleados del negocio y sin check-out
     const { data: activeNow } = employeeIds.length > 0 ? await supabase
       .from('attendance_records')
       .select(`
@@ -72,8 +73,6 @@ export async function GET(request: Request) {
       `)
       .not('check_in_time', 'is', null)
       .is('check_out_time', null)
-      .gte('check_in_time', today.toISOString())
-      .lte('check_in_time', todayEnd.toISOString())
       .in('employee_id', employeeIds)
       .order('check_in_time', { ascending: false })
       .limit(10) : { data: [] };
@@ -91,11 +90,15 @@ export async function GET(request: Request) {
       const dayEnd = new Date(date);
       dayEnd.setHours(23, 59, 59, 999);
 
+      // Convertir fechas del día a UTC
+      const dayStartUTC = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0, 0));
+      const dayEndUTC = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999));
+      
       const { data: dayRecords } = await supabase
         .from('attendance_records')
         .select('id, is_late')
-        .gte('check_in_time', dayStart.toISOString())
-        .lte('check_in_time', dayEnd.toISOString())
+        .gte('check_in_time', dayStartUTC.toISOString())
+        .lte('check_in_time', dayEndUTC.toISOString())
         .in('employee_id', employeeIds.length > 0 ? employeeIds : ['00000000-0000-0000-0000-000000000000']); // Si no hay empleados, usar UUID inválido para que no retorne nada
 
       let onTime = 0;
