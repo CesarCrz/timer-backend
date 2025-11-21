@@ -149,21 +149,12 @@ export async function POST(request: Request) {
       const checkInInBranchTZ = dayjs.utc(rec.check_in_time).tz(branchTZ);
       const checkInDate = checkInInBranchTZ.format('YYYY-MM-DD');
       
-      // Log para depuración
-      console.log('Filtering record:', {
-        check_in_time_utc: rec.check_in_time,
-        branch_timezone: branchTZ,
-        check_in_date_in_tz: checkInDate,
-        start_date: params.start_date,
-        end_date: params.end_date,
-        in_range: checkInDate >= params.start_date && checkInDate <= params.end_date
-      });
-      
       // Verificar que la fecha esté dentro del rango seleccionado
       const isInRange = checkInDate >= params.start_date && checkInDate <= params.end_date;
       
+      // Log solo si está fuera del rango (para depuración)
       if (!isInRange) {
-        console.log(`Record filtered out: ${checkInDate} is not between ${params.start_date} and ${params.end_date}`);
+        console.log(`[REPORTS] Record filtered out: check_in=${rec.check_in_time} -> ${checkInDate} (not in range ${params.start_date} to ${params.end_date})`);
       }
       
       return isInRange;

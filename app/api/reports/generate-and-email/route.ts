@@ -152,21 +152,12 @@ export async function POST(request: Request) {
       const checkInInBranchTZ = dayjs.utc(rec.check_in_time).tz(branchTZ);
       const checkInDate = checkInInBranchTZ.format('YYYY-MM-DD');
       
-      // Log para depuración
-      console.log('Filtering record:', {
-        check_in_time_utc: rec.check_in_time,
-        branch_timezone: branchTZ,
-        check_in_date_in_tz: checkInDate,
-        start_date: params.start_date,
-        end_date: params.end_date,
-        in_range: checkInDate >= params.start_date && checkInDate <= params.end_date
-      });
-      
       // Verificar que la fecha esté dentro del rango seleccionado
       const isInRange = checkInDate >= params.start_date && checkInDate <= params.end_date;
       
+      // Log solo si está fuera del rango (para depuración)
       if (!isInRange) {
-        console.log(`Record filtered out: ${checkInDate} is not between ${params.start_date} and ${params.end_date}`);
+        console.log(`[REPORTS] Record filtered out: check_in=${rec.check_in_time} -> ${checkInDate} (not in range ${params.start_date} to ${params.end_date})`);
       }
       
       return isInRange;
@@ -493,8 +484,54 @@ export async function POST(request: Request) {
         attachmentSize: attachmentContent.length,
       });
       
-      // Re-lanzar el error para que handleApiError lo maneje
-      throw emailError;
+      // Guardar en historial de reportes aunque falle el correo
+      try {
+        const branchNames = params.branch_ids && params.branch_ids.length > 0
+          ? (await Promise.all(
+              params.branch_ids.map(async (id) => {
+                const { data } = await supabase.from('branches').select('name').eq('id', id).single();
+                return data?.name || '';
+              })
+            )).filter(Boolean)
+          : [];
+        
+        const employeeNames = params.employee_ids && params.employee_ids.length > 0
+          ? (await Promise.all(
+              params.employee_ids.map(async (id) => {
+                const { data } = await supabase.from('employees').select('full_name').eq('id', id).single();
+                return data?.full_name || '';
+              })
+            )).filter(Boolean)
+          : [];
+
+        const { data: savedReport } = await supabase.from('report_history').insert({
+          business_id: businessId,
+          report_type: reportType,
+          start_date: params.start_date,
+          end_date: params.end_date,
+          branch_ids: params.branch_ids || null,
+          branch_names: branchNames.length > 0 ? branchNames : null,
+          employee_ids: params.employee_ids || null,
+          employee_names: employeeNames.length > 0 ? employeeNames : null,
+          format: params.format,
+          created_by: user.id,
+        }).select('id').single();
+
+        // Devolver respuesta indicando que el reporte se generó pero el correo falló
+        return withCors(origin, Response.json({ 
+          emailed: false,
+          error: 'El reporte se generó correctamente pero no se pudo enviar por correo. Puedes descargarlo desde el historial de reportes.',
+          report_id: savedReport?.id,
+          email_error: emailError.message || 'Timeout al enviar correo',
+        }, { status: 207 })); // 207 Multi-Status: éxito parcial
+      } catch (historyError) {
+        console.error('Error guardando historial de reporte después de fallo de correo:', historyError);
+        // Si también falla guardar el historial, devolver error completo
+        return withCors(origin, Response.json({ 
+          error: 'El reporte se generó pero no se pudo enviar por correo ni guardar en el historial. Por favor, intenta nuevamente.',
+          email_error: emailError.message || 'Timeout al enviar correo',
+        }, { status: 500 }));
+      }
     }
   } catch (error) {
     return handleApiError(error);

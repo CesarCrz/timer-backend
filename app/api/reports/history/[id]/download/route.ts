@@ -110,20 +110,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       const checkInInBranchTZ = dayjs.utc(rec.check_in_time).tz(branchTZ);
       const checkInDate = checkInInBranchTZ.format('YYYY-MM-DD');
       
-      // Log para depuración
-      console.log('Filtering record:', {
-        check_in_time_utc: rec.check_in_time,
-        branch_timezone: branchTZ,
-        check_in_date_in_tz: checkInDate,
-        start_date: reportHistory.start_date,
-        end_date: reportHistory.end_date,
-        in_range: checkInDate >= reportHistory.start_date && checkInDate <= reportHistory.end_date
-      });
-      
       const isInRange = checkInDate >= reportHistory.start_date && checkInDate <= reportHistory.end_date;
       
+      // Log solo si está fuera del rango (para depuración)
       if (!isInRange) {
-        console.log(`Record filtered out: ${checkInDate} is not between ${reportHistory.start_date} and ${reportHistory.end_date}`);
+        console.log(`[REPORTS] Record filtered out: check_in=${rec.check_in_time} -> ${checkInDate} (not in range ${reportHistory.start_date} to ${reportHistory.end_date})`);
       }
       
       return isInRange;
