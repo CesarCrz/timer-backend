@@ -1,4 +1,4 @@
-import ExcelJS from 'exceljs';
+import * as ExcelJS from 'exceljs';
 
 export async function generateExcelReport(reportData: any[], startDate: string, endDate: string): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
@@ -136,7 +136,6 @@ export async function generateExcelReport(reportData: any[], startDate: string, 
       total: parseFloat(emp.summary.total_payment),
       overtime: parseFloat(emp.summary.total_overtime),
       overtime_pay: totalOvertimePayment,
-      overtime_pay: '',
     });
     empSummaryRow.font = { bold: true };
     empSummaryRow.fill = {
